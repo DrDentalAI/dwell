@@ -1,4 +1,4 @@
-<title>ChargeStack Waitlist</title>
+<title>Dwell Planner — Charging Discount Checker</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Public+Sans:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;700&display=swap">
@@ -155,7 +155,7 @@ footer p{max-width:78ch}
 <div class="wrap">
   <nav>
     <span class="bolt"><svg viewBox="0 0 24 24"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg></span>
-    <span class="logo">ChargeStack</span>
+    <span class="logo">Dwell Planner</span>
     <a class="navlink" href="#how">How it works</a>
   </nav>
 </div>
@@ -163,13 +163,13 @@ footer p{max-width:78ch}
 <div class="wrap hero">
   <span class="kicker">Michigan &amp; Greater Toronto · in build</span>
   <h1>The discount you're missing isn't a <em>coupon</em>.</h1>
-  <p class="lede">We checked every major charging network in the US and Canada. Across roughly thirty of them there was exactly <b>one</b> published promo code. Meanwhile an Uber Pro Gold driver can get <b>45% off every EVgo session</b> for free, and most of them have no idea. ChargeStack finds what you already qualify for, then tells you what it's costing you not to claim it.</p>
+  <p class="lede">We checked every major charging network in the US and Canada. Across roughly thirty of them there was exactly <b>one</b> published promo code. Meanwhile an Uber Pro Gold driver can get <b>45% off every EVgo session</b> for free, and most of them have no idea. This checker finds what you already qualify for — from the car you drive, the apps you already have, the card in your wallet — and tells you what it's costing you not to claim it.</p>
 
   <form class="signup" id="form">
     <input type="email" id="email" placeholder="you@email.com" required aria-label="Email address">
     <button type="submit" id="submit">Join the waitlist</button>
   </form>
-  <p class="formnote" id="note">Early access when the Michigan and GTA lists go live. No spam — a code alert or nothing.</p>
+  <p class="formnote" id="note">One email when the Michigan and GTA lists go live. No spam, no alerts, no digest.</p>
 </div>
 
 <div class="wrap" style="padding-bottom:8px">
@@ -195,10 +195,10 @@ footer p{max-width:78ch}
       <span><span class="lname">GM Energy Pass at IONNA</span><span class="lsub">Free for GM owners · standing 10% off</span></span>
       <span class="lval">$58</span></div>
     <div class="lrow"><span class="lrank">06</span>
-      <span><span class="lname">Every promo code published this year, combined</span><span class="lsub">EVgo $5–15 credits, roughly one a month</span></span>
+      <span><span class="lname">Every promo code published this year, combined</span><span class="lsub">The thing everyone hunts for. Last line for a reason.</span></span>
       <span class="lval" style="color:var(--brass)">$45</span></div>
   </div>
-  <p class="lcap">Estimates at 400 kWh/month of public DC fast charging at $0.48/kWh. Your numbers set these figures in the app. The point of the table is the ordering, not the dollars — the coupon everyone hunts for is the last line.</p>
+  <p class="lcap">Estimates at 400&nbsp;kWh/month of public DC fast charging. Your own numbers, your car and your region set these figures in the app, against each network's published rate — the table is here for the <em>ordering</em>, not the dollars. The coupon everyone hunts for is the last line.</p>
 </div>
 
 <section id="how">
@@ -208,7 +208,7 @@ footer p{max-width:78ch}
         <div class="eyebrow">How it works</div>
         <h2>Answer four questions. Get a ranked list.</h2>
         <p>Your vehicle, where you charge, which networks you already have accounts with, and whether you drive for a gig platform. That's the whole setup. Everything after that is arithmetic — and it's arithmetic nobody is doing for you today.</p>
-        <p>The app watches for real promo codes too. It just doesn't pretend they're the main event.</p>
+        <p>Then it keeps checking. Automaker programs launch and expire, plans change price, and an offer you qualified for in March may be gone by October — the IONNA discounts for BMW and MINI drivers expire on 30 September 2026. Every entry carries the date it was last verified, and anything older than 90 days is marked as such rather than quietly shown as current.</p>
       </div>
       <div class="mock" aria-hidden="true">
         <div class="mrow on"><span class="mrail"></span>
@@ -241,49 +241,50 @@ footer p{max-width:78ch}
 <section>
   <div class="wrap narrow">
     <div class="eyebrow">The honest part</div>
-    <h2>It can't type the code into your EVgo app. Nothing can.</h2>
-    <p>No charging network publishes an interface that accepts a promo code from outside its own app, and both app stores forbid one app driving another app's screen. Android tightened that further in March 2026 — the workaround everyone reaches for now breaks on any phone with Advanced Protection turned on.</p>
-    <p>So ChargeStack does the thing that actually works and never breaks: one tap copies the code and opens the network app. You paste. No permissions to grant, nothing to go wrong on the next OS update.</p>
-    <p>Anyone promising you auto-redemption is either about to get pulled from the store or hasn't shipped yet.</p>
+    <h2>Every number here can be checked.</h2>
+    <p>Each discount carries the source it came from, the date it was last read, and how strongly it is held — <b>published</b> means it was read from the operator's own terms page; <b>secondary</b> means a credible source that isn't the operator. Anything weaker is shown to you and explained, but never quietly applied to a price.</p>
+    <p>Discounts do not stack. No operator we found permits combining a membership with a partner discount, so the checker applies exactly one and names it. Where an automaker genuinely does stack two offers — Hyundai and IONNA do — it is carried as a single combined entry rather than pretending the rule changed.</p>
+    <p>The discount comes off the rate before tax, in that order, because that is how a settled receipt reads and what Mercedes' own promotion terms say: the discount applies to energy, not to idle fees, parking or taxes.</p>
   </div>
 </section>
 
 <section>
   <div class="wrap">
     <div class="eyebrow">Pricing</div>
-    <h2>Free where it counts.</h2>
+    <h2>The checker is free. It always will be.</h2>
     <div class="price">
       <div class="tier">
-        <div class="tname">Free</div>
+        <div class="tname">Discount checker</div>
         <div class="tprice">$0</div>
-        <div class="tper">forever</div>
+        <div class="tper">forever, no account</div>
         <ul class="tlist">
-          <li>Every live code</li>
-          <li>Your networks, both regions</li>
-          <li>Full eligibility check</li>
-          <li>Weekly digest</li>
+          <li>Full eligibility check, both regions</li>
+          <li>Ranked by what it's worth in a year</li>
+          <li>Names the bad trade — a paid plan a free one beats</li>
+          <li>Source and verified-on date for every entry</li>
         </ul>
       </div>
       <div class="tier hi">
-        <div class="tname">ChargeStack+</div>
-        <div class="tprice">$2.99</div>
-        <div class="tper">per month, or $24 a year</div>
+        <div class="tname">Dwell Planner</div>
+        <div class="tprice">$14.99</div>
+        <div class="tper">once. Not a subscription.</div>
         <ul class="tlist">
-          <li>Instant alerts — codes go fast</li>
-          <li>Inbox capture, so you see codes before the forums do</li>
-          <li>Savings dashboard and expiry tracking</li>
-          <li>Trip mode: Michigan to Toronto, cheapest stops</li>
-          <li>Rideshare tier optimizer</li>
+          <li>What your battery will be at when you leave, and what it costs</li>
+          <li>Unlimited garage and saved chargers</li>
+          <li>Measured-rate override — use the kW you can actually see</li>
+          <li>Idle-fee warnings: it knows you finish before you're back</li>
+          <li>Time-of-use, taxes and fees, in receipt order</li>
         </ul>
       </div>
     </div>
+    <p class="lcap" style="margin-top:18px">No ads, no tracking, no analytics, no account. The checker runs in your browser and nothing you enter leaves the device.</p>
   </div>
 </section>
 
 <section>
   <div class="wrap narrow">
     <h2>Get the first invite.</h2>
-    <p style="margin-bottom:24px">Michigan and the Greater Toronto Area first, since that's where it's being built and tested. Everywhere else after.</p>
+    <p style="margin-bottom:24px">Michigan and the Greater Toronto Area first, since that's where it's being built and tested against real receipts. Everywhere else after.</p>
     <form class="signup" id="form2">
       <input type="email" id="email2" placeholder="you@email.com" required aria-label="Email address">
       <button type="submit" id="submit2">Join the waitlist</button>
@@ -294,7 +295,7 @@ footer p{max-width:78ch}
 
 <footer>
   <div class="wrap">
-    <p><b>ChargeStack is an independent app.</b> It is not affiliated with, endorsed by, or sponsored by EVgo, Electrify America, ChargePoint, Tesla, Mercedes-Benz, IONNA, Ivy Charging, FLO, Petro-Canada, Green P or any other network named on this page. Network names are used only to identify whose programs are being described. Promo codes may be single-use, region-locked, or withdrawn without notice; dollar figures are estimates generated from usage numbers you supply, not guarantees of savings.</p>
+    <p><b>Dwell Planner is an independent app.</b> It is not affiliated with, endorsed by, or sponsored by EVgo, Electrify America, ChargePoint, Tesla, Mercedes-Benz, IONNA, Ivy Charging, FLO, Petro-Canada, Green P or any other network named on this page. Network names are used only to identify whose programs are being described. Discount programs may be model-specific, region-locked, or withdrawn without notice; dollar figures are estimates generated from usage numbers you supply, not guarantees of savings. Each entry shows when it was last verified — check the operator's own terms before relying on one.</p>
     <p class="srcs">Figures on this page were compiled September 2, 2026 from network operators' own published terms and pricing pages, including <a href="https://www.evgo.com/rideshare/" target="_blank" rel="noopener">EVgo</a>, <a href="https://www.electrifyamerica.com/pricing/" target="_blank" rel="noopener">Electrify America</a>, <a href="https://mercedesbenzhpc.com/promotions-terms/" target="_blank" rel="noopener">Mercedes-Benz HPC</a>, <a href="https://www.ionna.com/faqs/" target="_blank" rel="noopener">IONNA</a> and <a href="https://gmenergy.gm.com/energypass" target="_blank" rel="noopener">GM Energy Pass</a>.</p>
   </div>
 </footer>
