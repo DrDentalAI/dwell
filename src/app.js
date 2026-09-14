@@ -3,7 +3,7 @@
    Consumes EVCore (shared calculation engine) and EVLibrary. No framework.
    ========================================================================= */
 'use strict';
-const E = EVCore, L = EVLibrary, P = EVPricing;
+const E = EVCore, L = EVLibrary, P = EVPricing, D = EVDiscounts;
 const $ = id => document.getElementById(id);
 const h = s => String(s == null ? '' : s).replace(/[&<>"']/g, c =>
   ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
@@ -27,7 +27,9 @@ const DEFAULT_SESSION = () => ({
   solveFor: 'departure',
   granularity: 10,
   // Cost context: which network, which membership, and any price you entered.
-  pricing: { networkId: null, planId: null, regionId: null, userRate: null }
+  pricing: { networkId: null, planId: null, regionId: null, userRate: null },
+  /* Who the driver is, for eligibility only. Never leaves the device. */
+  eligibility: { memberships: [], gig: { platform: null, tier: null }, cards: [] }
 });
 const DEFAULT_TRIP = () => ({
   startSOC: 90, startTime: '07:00', reserveSOC: 10, arriveSOC: 30,
@@ -531,6 +533,100 @@ baseRate(n) {
   });
 },
 
+/* ---- DISCOUNT ELIGIBILITY -------------------------------------------
+   ev-pricing.js resolves WHAT THE CHARGER COSTS. ev-discounts.js resolves
+   WHAT FRACTION OF IT YOU DON'T PAY. It is handed pricing's rate; it never
+   looks one up. The order is fixed and a settled receipt proves it, with the
+   Mercedes HPC promotion terms saying the same thing independently:
+
+       rate -> discount -> subtotal -> tax
+
+   Tax lands on the discounted subtotal, never on the rack rate, and never
+   folded into the per-kWh figure.                                        */
+discountProfile() {
+  const v = this.currentVehicle();
+  const pl = S.place || {};
+  const el = S.session.eligibility || {};
+  return {
+    region: pl.province ? 'CA' : 'US',
+    make: v ? v.make : null,
+    model: v ? v.model : null,
+    modelYear: v ? v.modelYear : null,
+    memberships: (el.memberships || []).concat(
+      S.session.pricing.planId ? [S.session.pricing.planId] : []),
+    gig: el.gig && el.gig.platform ? el.gig : null,
+    cards: el.cards || []
+  };
+},
+
+/* The best discount that applies, as a fraction. Null when none does. */
+currentDiscount() {
+  const net = this.currentNetwork(); if (!net) return null;
+  const prof = this.discountProfile();
+  const dId = D.networkIdForPricingId(net.id, prof.region);
+  if (!dId) return null;
+  const rate = this.currentRate();
+  return D.resolveRate({
+    network: dId,
+    profile: prof,
+    baseRate: rate && rate.perKWh != null ? rate.perKWh : undefined,
+    monthlyKwh: S.monthlyKwh || 0,
+    today: new Date()
+  });
+},
+
+/* Fold the discount into the plan pricing already understands.
+
+   A collision matters here: EVgo PlusMax exists BOTH as a plan in
+   ev-pricing.js and as an entry in ev-discounts.js. Summing them would take
+   30% off twice. Nothing stacks, so take the better of the two and say which
+   one won -- never add them. */
+effectivePlan(dres) {
+  const plan = this.currentPlan();
+  const planPct = plan && plan.discountPct ? plan.discountPct / 100 : 0;
+  const discPct = dres ? dres.discountPercent : 0;
+  if (discPct <= planPct) return { plan, source: plan ? 'plan' : null, pct: planPct };
+  /* Borrow the plan's fee waivers -- an automaker discount does not waive a
+     session fee, so only carry across what the selected plan actually grants. */
+  const merged = Object.assign({}, plan || {}, {
+    id: (plan && plan.id) || 'discount',
+    name: dres.applied ? dres.applied.label : 'Discount',
+    discountPct: discPct * 100
+  });
+  return { plan: merged, source: 'discount', pct: discPct };
+},
+
+discountHTML(dres) {
+  if (!dres) return '';
+  const el = dres.eligible || [], ex = dres.excluded || [];
+  if (!el.length && !ex.length) return '';
+
+  const tag = c => `<span class="tag ${h(c)}">${h(c)}</span>`;
+  const rows = el.map(e => `<div class="drow${e.id === (dres.applied && dres.applied.id) ? ' on' : ''}">
+      <div><b>${h(e.label)}</b> ${tag(e.confidence)}
+        ${e.expires ? `<br><span class="s">Ends ${h(e.expires)}</span>` : ''}
+        ${e.stale ? `<br><span class="s" style="color:var(--locked);font-weight:600">&#9888; Last verified ${e.ageDays} days ago — over ${D.STALE_DAYS}. Check before relying on it.</span>` : ''}
+      </div>
+      <div class="dval">${(e.percent * 100).toFixed(0)}%</div>
+    </div>`).join('');
+
+  const exRows = ex.length ? `<details style="margin-top:10px"><summary class="s">Why ${ex.length} other${ex.length === 1 ? '' : 's'} didn't apply</summary>
+      ${ex.map(e => `<div class="s" style="margin-top:6px">${h(e.label)} — ${h(e.reason)}${e.caveat ? ` <i>${h(e.caveat)}</i>` : ''}</div>`).join('')}
+    </details>` : '';
+
+  const rateLine = dres.rateSource === 'estimated-national'
+    ? `<div class="note warn" style="margin-top:10px"><b>&#9888; Estimated national rate.</b>
+        ${h(dres.rateNote || '')} No published rate exists for this network, so the
+        percentage above is applied to an average rather than a real price.</div>`
+    : '';
+
+  return `<div class="card"><div class="card-h"><h2>Discounts you qualify for</h2></div>
+    ${rows || `<div class="s">Nothing applies here.</div>`}
+    ${rateLine}
+    ${(dres.notes || []).map(n => `<div class="s" style="margin-top:8px">${h(n)}</div>`).join('')}
+    ${exRows}</div>`;
+},
+
 renderPricing() {
   const box = $('pricing-box'); if (!box) return;
   const pr = S.session.pricing;
@@ -668,7 +764,13 @@ costHTML(res) {
   const plan = this.currentPlan();
   const sim = res.sim;
   const dwell = res.dwellMin;
-  const c = P.sessionCost(sim, rate, { plan, dwellMinutes: dwell, network: net,
+  /* rate -> discount -> subtotal -> tax. `effectivePlan` picks the better of
+     the selected membership plan and any eligibility discount; pricing then
+     applies that single percentage to every TOU window, sums the subtotal,
+     and taxes the subtotal. Tax is never folded into the per-kWh rate. */
+  const dres = this.currentDiscount();
+  const eff = this.effectivePlan(dres);
+  const c = P.sessionCost(sim, rate, { plan: eff.plan, dwellMinutes: dwell, network: net,
     startClockMinutes: E.parseClock(S.session.plugInTime) });
 
   if (!c.available) {
@@ -693,6 +795,15 @@ costHTML(res) {
           ? `this network bills on <b>total time connected</b>, so the meter never stops — the whole dwell is charged whether or not energy is flowing.`
           : `no idle fee is published for this network, but check the charger.`)}
       </div>` : '';
+
+  const discLine = eff.pct > 0 ? `<div class="note ok" style="margin-top:0;margin-bottom:12px">
+      <b>${(eff.pct * 100).toFixed(0)}% off applied</b> — ${h(eff.source === 'discount'
+        ? (dres.applied ? dres.applied.label : 'eligibility discount')
+        : (eff.plan && eff.plan.name) || 'membership plan')}.
+      ${dres && dres.discountPercent > 0 && eff.source === 'plan'
+        ? `Your plan beats the ${(dres.discountPercent * 100).toFixed(0)}% you also qualify for; they don't stack.`
+        : ''}
+      <br><span style="font-size:11.5px">Taken off the rate before tax, which is how the settled receipt reads.</span></div>` : '';
 
   const stats = `<div class="stats" style="margin-top:0">
     <div class="stat"><div class="l">Total</div><div class="v">${P.money(c.total, cur)}</div></div>
@@ -741,13 +852,13 @@ costHTML(res) {
   return `<div class="card">
     <div class="card-h"><h2>What this costs</h2>
       <span class="badge ${c.confidence === 'published' || c.confidence === 'user' ? 'solved' : 'locked'}">${h(c.confidence)}</span></div>
-    ${stats}${breakdown}${touHTML}
+    ${discLine}${stats}${breakdown}${touHTML}
     <div class="hint" style="margin-top:9px">${h(net.name)}${plan ? ` · ${h(plan.name)}` : ''}
       · billed ${h(c.basis)}${c.taxIncluded ? ' · taxes included' : ''}
       <br>Roughly ${P.money(conv, other)} in ${other} at ${S.fx.USD_CAD} (as of ${h(S.fx.asOf)}) — converted, not a native price.</div>
     ${idleWarn}
     ${c.stale ? `<div class="note warn" style="margin-top:11px">&#9888; This rate was last verified ${c.ageDays} days ago and may be outdated.</div>` : ''}
-  </div>`;
+  </div>${this.discountHTML(dres)}`;
 },
 
 /* ------------------------------------------- MEMBERSHIP COMPARISON SHEET */
