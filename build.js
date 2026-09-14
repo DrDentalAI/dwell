@@ -13,7 +13,7 @@ const p = f => fs.readFileSync(__dirname + '/' + f, 'utf8').replace(/\n$/, '');
 
 /* Bump VERSION whenever something user-visible changes. The build stamp is
    generated here so the phone can prove which copy it is actually running. */
-const VERSION = '1.12.1';
+const VERSION = '1.12.2';
 const now = new Date();
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const pad = n => String(n).padStart(2, '0');
@@ -85,6 +85,59 @@ APP_SRC.split('\n').forEach((line, i) => {
 if (minted.length)
   throw new Error('build: the UI may only demote a curve to \'user\', never mint a ' +
     'stronger label:\n  ' + minted.join('\n  '));
+
+/* ---- UI METHOD GATE -----------------------------------------------------
+   v1.12.1 shipped `this.currentVehicle()` on the first line of a render path.
+   That function exists nowhere in the file. Every engine test passed -- they
+   all ran in Node and none of them ever opened the page -- and the app was dead
+   on open for every user with a charging network selected.
+
+   JavaScript will not tell you about a method that does not exist until the
+   line runs, so check it here: every `this.x(...)` written in src/app.js must
+   resolve to a key the UI object actually defines. Crude and string-based, and
+   it would have caught this exact bug in under a millisecond. */
+{
+  const rawSrc = p('src/app.js');
+  const start = rawSrc.indexOf('const UI = {');
+  if (start === -1) throw new Error('build: could not find the UI object in src/app.js');
+  /* Strip comments first. The comment explaining this very bug names
+     `this.currentVehicle()`, and a gate that trips over its own documentation
+     is a gate people delete. */
+  const uiSrc = rawSrc.slice(start)
+    .replace(/\/\*[\s\S]*?\*\//g, m => m.replace(/[^\n]/g, ' '))
+    .replace(/(^|[^:])\/\/[^\n]*/g, (m, p1) => p1 + ' '.repeat(m.length - p1.length));
+
+  /* Methods sit at column 0 inside the object literal. Accept shorthand
+     (`name(a) {`), `name: function`, and `name: async`. */
+  const defined = new Set(['_booted', '_editId']);
+  uiSrc.split('\n').forEach(line => {
+    let m = line.match(/^(?:async\s+)?([a-zA-Z_][a-zA-Z0-9_]*)\s*\([^)]*\)\s*\{/);
+    if (m) defined.add(m[1]);
+    m = line.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*(?:async\s+)?(?:function|\()/);
+    if (m) defined.add(m[1]);
+  });
+
+  /* `this` inside an inline HTML on* attribute is the DOM element, not UI.
+     Those live inside template literals as onclick="...this.something...". */
+  const inAttr = new Set();
+  (uiSrc.match(/on[a-z]+="[^"]*"/g) || []).forEach(a => {
+    (a.match(/this\.([a-zA-Z_][a-zA-Z0-9_]*)\s*\(/g) || []).forEach(c => {
+      inAttr.add(c.replace(/^this\./, '').replace(/\s*\($/, ''));
+    });
+  });
+
+  const missing = new Set();
+  const callRe = /this\.([a-zA-Z_][a-zA-Z0-9_]*)\s*\(/g;
+  let c;
+  while ((c = callRe.exec(uiSrc)) !== null) {
+    if (!defined.has(c[1]) && !inAttr.has(c[1])) missing.add(c[1]);
+  }
+  if (missing.size)
+    throw new Error('build: src/app.js calls this.<name>() for methods the UI ' +
+      'object does not define: ' + [...missing].join(', ') +
+      '. This is the v1.12.1 startup crash — it kills the app on open, not in a test.');
+  console.log(`  ui gate: ${defined.size} UI methods, every this.x() call resolves`);
+}
 
 /* ---- RATE AUTHORITY GATE ------------------------------------------------
    ev-pricing.js is the sole rate authority. A rackRate in ev-discounts.js for
