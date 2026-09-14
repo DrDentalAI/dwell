@@ -65,6 +65,75 @@ sales tax — a module that already exists and is called `ev-pricing.js`.
 
 ---
 
+## 2a. INCIDENT — v1.12.1 was dead on open, and every test passed
+
+`discountProfile()` called **`this.currentVehicle()`**. That function exists
+nowhere in the codebase; the accessor is the module-level `activeVehicle()`. It
+was the first line of the function, on a render path reached from `init()`, so
+the app died at startup for **every user with a charging network selected** —
+which, after the discount work, is the normal state.
+
+```
+TypeError: this.currentVehicle is not a function
+  discountProfile  index.html:4496
+  currentDiscount  index.html:4514
+  costHTML         index.html:4720
+  renderOutput     index.html:5631
+  setTemp          index.html:5090
+  renderAll        index.html:5185
+  init             index.html:6639
+```
+
+Reproduced headlessly, byte-identical stack and line numbers.
+
+### The owner's diagnosis was reasonable and wrong, and that matters
+
+The reported theory was an unguarded `S.session.pricing.planId` against a
+pre-v1.12 saved session. Plausible — but `load()` already rebuilds
+`S.session.pricing` from defaults on every restore, so that path could not fire.
+**The crash was on line 4496; the `planId` reference is on 4505.** Execution never
+reached it.
+
+This is not an upgrade bug. A brand-new install crashes the moment a network is
+picked. The saved session only made it fire at startup instead of on first tap.
+
+### Why nothing caught it
+
+Every check that session ran was in Node: engine maths, receipt reproduction,
+discount resolution, provenance gates, build gates. All passed. All correct.
+
+**None of them ever opened the page.** The `effectivePlan` logic was verified by
+*reimplementing it in the test harness* rather than calling the app's copy —
+which verified the algorithm and left the actual shipped function unexecuted.
+
+> **A build that verifies the maths and never opens the app is not a verified
+> build.** "All tests pass" is a claim about the tests. The receipt reproducing
+> to the cent said nothing about whether the app started.
+
+### Fixed in v1.12.2
+
+| # | fix | verification |
+|---|---|---|
+| 1 | `this.currentVehicle()` → `activeVehicle()` | 9/9 smoke scenarios pass; same test shows **5/9 FAIL** against the shipped v1.12.1 artifact, naming the exact error |
+| 2 | **`test/smoke.js`** — headless startup test, 9 scenarios: first run, v1.11.2 upgrade, missing keys, null session, wrong-typed fields, no vehicles, garbage in storage | Asserts zero uncaught errors **and** that the page actually painted — a silent blank screen fails |
+| 3 | **UI method gate in `build.js`** — every `this.x()` in `src/app.js` must resolve to a UI key | Negative-tested: reinstating the bug fails the build naming `currentVehicle`. 137 methods checked |
+| 4 | **Render failure can no longer take the app down.** `init()` retries in safe mode with a reset session, then paints, with a "Reset saved data" control | Vehicles and saved rates survive a session reset |
+| 5 | **Discount layer isolated** in `costHTML` — if it throws, the cost card still renders at the undiscounted rate with an explicit notice | Failing safe means quoting the *higher* price, never a fabricated discount |
+| 6 | **`load()` forward-migration** — nested session objects rebuilt from defaults and type-checked, not trusted to exist | `eligibility` as a string, `memberships` as a string, missing `pricing`: all pass |
+
+### The fixture lesson, which nearly repeated the original mistake
+
+The first smoke test **passed all six scenarios against the provably broken
+build.** It used the wrong localStorage key (`dwell`, not `evdwell.v1`), so every
+scenario silently ran as a first-run install and never reached the crash.
+
+A hand-written fixture tests your *idea* of the app. The fixture was rebuilt by
+driving a real install — pick a network, pick a plan, read `localStorage` back,
+delete the keys v1.12 added. **A test that passes against known-broken code is
+not evidence; it is a second bug wearing the costume of a result.**
+
+---
+
 ## 3. What changed this session — v1.12.0
 
 ### Discount integration (the whole of Task 2)
@@ -108,6 +177,29 @@ worse than no gate, because it reports success.*
   entry ranks by percentage and returns `annualValue: null` rather than 0 — an
   unpriced offer is worth an *unknown* amount, and sorting it as zero would bury
   real offers.
+
+---
+
+## 3a. Deploy
+
+| | |
+|---|---|
+| **URL** | `https://raw.githack.com/DrDentalAI/dwell/main/index.html` |
+| Installed as | iOS PWA, added to home screen |
+| Source of truth | `main` branch of `DrDentalAI/dwell` — githack serves the raw file with a usable content-type |
+
+Recorded here because it had never been written down, and it changes what a
+deploy *is*: pushing `index.html` to `main` **is** the release. There is no build
+step, no CDN purge and no staging between a commit and every installed PWA. A
+broken `index.html` on `main` is a broken app on the phone within a cache cycle.
+
+Two consequences worth holding onto:
+
+- **`main` is production.** The v1.12.1 crash was live the moment the file
+  landed. `test/smoke.js` must pass before anything reaches `main`.
+- **A PWA caches.** After a bad deploy the fix is not instant — iOS may serve the
+  cached shell until it revalidates. If a fix looks like it did not take, close
+  the PWA fully and reopen before concluding anything.
 
 ---
 
@@ -221,7 +313,7 @@ diagnostic message. Verification cost two web searches.
 
 | # | item | state |
 |---|---|---|
-| 1 | Test v1.12.0 on the phone | **ready** |
+| 1 | Test **v1.12.2** on the phone | **ready** — v1.12.0/v1.12.1 are dead on open, skip them |
 | 2 | Deploy the rewritten `/discounts` landing page | ready, not deployed |
 | 3 | Eligibility profile UI — memberships, gig platform+tier, cards | **needed**; the engine reads these, nothing sets them yet |
 | 4 | Google Play via TWA | pending |
@@ -280,6 +372,10 @@ claimed by anyone. **This is the single highest-value unfinished piece.**
   label.
 - Losing source because only the built artifact was committed.
 - Trusting a number because it looked plausible. See §2.
+- Verifying the engine and never opening the app. See §2a — v1.12.1 passed every
+  test and was dead on open.
+- Trusting a test that has never been seen to fail. See §2a — the first smoke
+  test passed against the broken build.
 - Settling a factual question by re-observing instead of checking a primary
   source. See §4a — the first report was right, the confident retraction was
   wrong, and only DOE's own announcement separated them.
@@ -309,7 +405,10 @@ Regenerate this file every session, date updated, and output it as a single
 copyable block. Always include: what changed **with the number that proves it**;
 what is blocked or needs a decision; and an upload verdict in one of two forms.
 
-**UPLOAD THE PROGRESS FILE — `ev-discounts.js` moved out of `pending/` and is now
+**UPLOAD THE PROGRESS FILE — v1.12.0 and v1.12.1 are dead on open and must not be
+deployed; v1.12.2 fixes the crash and adds a headless startup test plus a build
+gate that would have caught it; the deploy URL is recorded for the first time
+(`raw.githack.com`); `ev-discounts.js` moved out of `pending/` and is now
 integrated and gated; the station-finder host changed from `developer.nrel.gov`
 to `developer.nlr.gov` and the old host no longer resolves, which invalidates any
 older build; the queue reordered around a newly-surfaced blocker (the eligibility
