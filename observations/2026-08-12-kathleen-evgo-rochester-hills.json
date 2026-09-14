@@ -1,0 +1,79 @@
+{
+  "id": "2026-08-12-kathleen",
+  "type": "dc-session",
+  "vehicle": "vehicle-hummer-sut-24",
+  "date": "2026-08-12",
+  "timezone": "America/Detroit",
+  "site": {
+    "network": "EVgo",
+    "name": "Meijer",
+    "address": "3175 S Rochester Rd, Rochester Hills, MI 48307",
+    "stall": "KATHLEEN",
+    "connectorLabel": "Connector A",
+    "chargerId": "C14033",
+    "ratedKW": 350,
+    "connector": "CCS1",
+    "sharedCabinet": false,
+    "sharedCabinetNote": "Owner confirmed no vehicle on the paired connector, so the full cabinet output was available."
+  },
+  "conditions": {
+    "ambientC": 28,
+    "assumed": true,
+    "assumedNote": "Not instrumented. Inferred from a mid-August Michigan evening. Any fit that leans on temperature must treat this as soft."
+  },
+  "session": {
+    "startSOC": 62,
+    "endSOC_charger": 99,
+    "endSOC_car": 100,
+    "durationMinutes": 65.167,
+    "energyDispensedKWh": 87.5301,
+    "sessionCapMinutes": 120,
+    "sessionCapNote": "EVgo displays and enforces a 120-minute cap on DC sessions."
+  },
+  "receipt": {
+    "settled": true,
+    "readAt": "22:15",
+    "plan": "EVgo PlusMax",
+    "lineItems": {
+      "chargingFee": 27.13,
+      "ratePerKWh": 0.31,
+      "sessionFee": 0.0,
+      "subTotal": 27.13,
+      "taxPct": 6,
+      "tax": 1.63,
+      "total": 28.76
+    },
+    "currency": "USD",
+    "note": "Session Fee itemised at $0.00 -- the PlusMax waiver applied as published. An earlier reading of the app data appeared to show a $0.99 fixed fee; that was an artifact of fitting a line through laggy app readings while omitting sales tax, not a real charge."
+  },
+  "readings": [
+    { "clock": "21:50", "elapsedMin": 41.15, "soc": 97, "kWh": 72.56,   "cost": 23.40, "instantaneousKW": 45, "source": "phone-app" },
+    { "clock": "21:56", "elapsedMin": 46.17, "soc": 99, "kWh": 76.58,   "cost": 24.64, "instantaneousKW": 37, "source": "phone-app" },
+    { "clock": "21:59", "elapsedMin": 49.62, "soc": 99, "kWh": 78.29,   "cost": 25.17, "instantaneousKW": 32, "source": "phone-app" },
+    { "clock": "22:00", "elapsedMin": 50.48, "soc": 99, "kWh": 81.9815, "cost": 26.94, "instantaneousKW": 30, "source": "charger-screen" },
+    { "clock": "22:01", "elapsedMin": 51.78, "soc": 99, "kWh": 82.6275, "cost": 27.15, "instantaneousKW": 28, "source": "charger-screen" },
+    { "clock": "22:14", "elapsedMin": 65.15, "soc": 99, "kWh": 87.5276, "cost": 28.76, "instantaneousKW": 16, "source": "charger-screen" }
+  ],
+  "instrumentDisagreement": {
+    "observed": true,
+    "detail": "At 21:59 the phone app reported 78.29 kWh. Fifty-two seconds later the charger screen reported 81.9815 kWh -- 3.69 kWh apart, where 52 s at 30 kW is worth 0.43 kWh. The app's energy and cost tiles lag the dispenser by minutes. Its instantaneous kW tile is worse: it read 45 kW at a moment its own energy counter proves the truck was averaging 106 kW.",
+    "authoritative": "charger-screen",
+    "rule": "The dispenser is the meter. The app is a lagging summary of it. Fit to the charger screen and the settled receipt; use app readings only for cost-versus-energy relationships, where both tiles lag together."
+  },
+  "derivedFacts": [
+    "Effective all-in price $0.3286/kWh ($0.31 + 6% Michigan sales tax). Every charger-screen reading matches rate x kWh x 1.06 to the cent.",
+    "62% to 99% is 37 SOC points = 78.7 kWh into a 212.7 kWh pack against 82.6275 kWh dispensed, implying 95.2% DC charging efficiency.",
+    "The final 13 minutes dispensed 4.90 kWh to move one SOC point -- about 2.13 kWh of storage for 4.90 kWh bought, roughly 40% efficient. Cell balancing and heat, not range."
+  ],
+  "modelDisagreement": {
+    "note": "The shipped estimated curve predicts about 86 minutes for the 62->97% portion of this session. It took 41. The curve appears to be roughly 2x too pessimistic above 55% SOC.",
+    "action": "Recorded, not fitted. One session covers one SOC window at one temperature on one station; refitting to it would trade one wrong curve for a differently wrong curve still carrying a confident label."
+  },
+  "vehicleDashAfter": {
+    "soc": 100,
+    "rangeMi": 403,
+    "odometerMi": 40087,
+    "note": "Dash range is the truck's rolling estimate from recent driving, not a measurement of pack capacity."
+  },
+  "source": "Owner photographs of the EVgo phone app, the charger screen mid-session, the settled receipt screen, and the vehicle dash."
+}

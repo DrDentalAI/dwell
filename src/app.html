@@ -1,0 +1,182 @@
+<div id="app">
+
+  <header class="topbar">
+    <div style="flex:1;min-width:0">
+      <h1 id="scr-title">Dwell Planner</h1>
+      <div class="sub" id="scr-sub">What will I leave at?</div>
+    </div>
+    <button class="veh-chip" id="veh-chip" onclick="UI.go('garage')">
+      <span class="dot"></span>
+      <span class="txt">
+        <span class="nm" id="veh-name">No vehicle</span>
+        <span class="pk" id="veh-pack">Tap to add</span>
+      </span>
+    </button>
+  </header>
+
+  <main>
+
+    <!-- Removed by JS the instant it boots. If you can still see this, scripts
+         are not executing in this viewer — which is a viewer limitation, not a
+         bug in the app. -->
+    <div id="boot-fail" class="note bad">
+      <b>JavaScript isn't running in this viewer.</b>
+      The page is drawing, but nothing can be calculated or tapped — only the
+      plain temperature slider will move, because sliders move on their own.
+      Open the app from its own web address instead and everything works.
+    </div>
+    <noscript><div class="note bad"><b>JavaScript is switched off.</b>
+      This app is all calculation, so it needs it.</div></noscript>
+
+    <!-- ==================================================== PLAN ========= -->
+    <section class="screen on" id="s-plan">
+
+      <div class="card">
+        <div class="card-h"><h2>Where you'll be parked</h2>
+          <button class="act" onclick="UI.toggleAdvanced()" id="adv-btn">Advanced</button></div>
+
+        <div class="seg" id="lvl-seg" style="margin-bottom:11px">
+          <button data-lvl="AC" onclick="UI.setLevel('AC')">AC — Level 1/2</button>
+          <button data-lvl="DC" onclick="UI.setLevel('DC')">DC fast</button>
+        </div>
+
+        <label class="fl">Station</label>
+        <select id="station-preset" onchange="UI.setStationPreset(this.value)"><!--__AC_STATIONS__--></select>
+
+        <div id="adv-box" style="display:none;margin-top:12px">
+          <label class="fl">Connector at this station</label>
+          <select id="station-conn" onchange="UI.setStationConn(this.value)"><!--__AC_CONNECTORS__--></select>
+          <div class="grid3" style="margin-top:11px">
+            <div><label class="fl">Max kW</label>
+              <input type="number" id="st-kw" step="0.1" oninput="UI.setStationNum('maxKW',this.value)"></div>
+            <div><label class="fl">Max volts</label>
+              <input type="number" id="st-v" step="1" oninput="UI.setStationNum('maxVoltage',this.value)"></div>
+            <div><label class="fl">Max amps</label>
+              <input type="number" id="st-a" step="1" oninput="UI.setStationNum('maxAmps',this.value)"></div>
+          </div>
+          <p class="hint" id="st-note"></p>
+        </div>
+
+        <div id="site-label"></div>
+        <div id="shared-box"></div>
+        <div id="finder-box" style="margin-top:13px"></div>
+        <div id="pricing-box" style="margin-top:13px"></div>
+        <div id="measured-box" style="margin-top:13px"></div>
+        <div id="adapter-box" style="margin-top:12px"></div>
+        <button class="btn sm ghost" style="margin-top:11px" onclick="UI.saveStationPrompt()">
+          Save this charger for next time</button>
+      </div>
+
+      <div class="card">
+        <div class="card-h"><h2>Conditions</h2>
+          <span class="badge" id="temp-badge">22&deg;C</span></div>
+        <button class="btn sm ghost" id="geo-btn" onclick="UI.useLocation()"
+          style="margin-bottom:10px">&#128205; Use my location &amp; current weather</button>
+        <div id="geo-out"></div>
+        <div class="chips" id="season-chips" style="margin-bottom:6px"><!--__SEASON_CHIPS__--></div>
+        <input type="range" id="temp-slider" min="-25" max="45" step="1" value="22"
+               oninput="UI.setTemp(this.value)" style="width:100%">
+        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--tx3);
+                    margin-top:-6px"><span>&minus;25&deg;C</span><span>45&deg;C</span></div>
+        <div class="divider"></div>
+        <div class="toggle" onclick="UI.toggleEnv('enclosed')">
+          <div class="lb">Enclosed / garage parking<small>Sheltered parking blunts the cold-weather charging penalty.</small></div>
+          <div class="sw" id="sw-enclosed"></div>
+        </div>
+        <div id="precond-wrap" style="display:none">
+          <div class="toggle" onclick="UI.toggleEnv('precondition')">
+            <div class="lb">Precondition the battery<small>Warms the pack for full DC power &mdash; costs time and energy.</small></div>
+            <div class="sw" id="sw-precondition"></div>
+          </div>
+          <div class="toggle" id="enroute-row" style="display:none" onclick="UI.toggleEnv('precondEnRoute')">
+            <div class="lb">&hellip;while still driving<small>Warm-up finishes before you arrive, so it costs no dwell time.</small></div>
+            <div class="sw" id="sw-precondEnRoute"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-h"><h2>Solve for</h2>
+          <button class="act" onclick="UI.resetFields()">Reset</button></div>
+        <div class="seg" id="solvefor-seg" style="margin-bottom:13px">
+          <button data-sf="departure" onclick="UI.setSolveFor('departure')">Departure&nbsp;%</button>
+          <button data-sf="dwell" onclick="UI.setSolveFor('dwell')">Dwell&nbsp;time</button>
+          <button data-sf="arrival" onclick="UI.setSolveFor('arrival')">Arrival&nbsp;%</button>
+        </div>
+        <div id="fields"></div>
+      </div>
+
+      <div id="out"></div>
+    </section>
+
+    <!-- ==================================================== TRIP ========= -->
+    <section class="screen" id="s-trip">
+      <div class="card">
+        <div class="card-h"><h2>Trip setup</h2>
+          <button class="act" onclick="UI.saveTripPrompt()">Save trip</button></div>
+        <div class="row">
+          <div><label class="fl">Depart at SOC</label>
+            <input type="number" id="tp-start" min="0" max="100" oninput="UI.tripSet('startSOC',this.value)"></div>
+          <div><label class="fl">Depart time</label>
+            <input type="time" id="tp-time" oninput="UI.tripSet('startTime',this.value)"></div>
+        </div>
+        <div class="row" style="margin-top:11px">
+          <div><label class="fl">Reserve floor %</label>
+            <input type="number" id="tp-reserve" min="0" max="60" oninput="UI.tripSet('reserveSOC',this.value)"></div>
+          <div><label class="fl">Arrive with %</label>
+            <input type="number" id="tp-arrive" min="0" max="100" oninput="UI.tripSet('arriveSOC',this.value)"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-h"><h2>Legs</h2></div>
+        <div id="legs"></div>
+        <div class="row" style="margin-top:4px">
+          <button class="btn sm" onclick="UI.addLeg('drive')">+ Drive leg</button>
+          <button class="btn sm" onclick="UI.addLeg('stop')">+ Charging stop</button>
+        </div>
+      </div>
+
+      <div id="trip-out"></div>
+    </section>
+
+    <!-- =================================================== GARAGE ======== -->
+    <section class="screen" id="s-garage">
+      <div id="garage-list"></div>
+      <button class="btn primary" onclick="UI.openAddVehicle()">Add a vehicle</button>
+      <p class="hint" style="text-align:center;margin-top:14px">
+        Pack variant is required, not optional &mdash; two trucks with the same badge and
+        different module counts do not charge alike.</p>
+      <div id="build-info"></div>
+    </section>
+
+    <!-- ==================================================== SAVED ======== -->
+    <section class="screen" id="s-saved">
+      <div id="saved-list"></div>
+    </section>
+
+  </main>
+
+  <nav class="tabs">
+    <button data-tab="plan" onclick="UI.go('plan')">
+      <svg viewBox="0 0 24 24"><path d="M13 2L4.5 13.5H11l-1 8.5 9-11.5h-6.5z"/></svg>Plan</button>
+    <button data-tab="trip" onclick="UI.go('trip')">
+      <svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M6 8.5v4a3 3 0 003 3h6a3 3 0 013 3v-3"/></svg>Trip</button>
+    <button data-tab="garage" onclick="UI.go('garage')">
+      <svg viewBox="0 0 24 24"><path d="M3 10.5l9-6.5 9 6.5V20a1 1 0 01-1 1H4a1 1 0 01-1-1z"/><path d="M7 21v-6h10v6"/></svg>Garage</button>
+    <button data-tab="saved" onclick="UI.go('saved')">
+      <svg viewBox="0 0 24 24"><path d="M6 3h12a1 1 0 011 1v17l-7-4-7 4V4a1 1 0 011-1z"/></svg>Saved</button>
+  </nav>
+</div>
+
+<div class="scrim" id="scrim" onclick="UI.closeSheet()"></div>
+<div class="sheet" id="sheet">
+  <div class="grab"></div>
+  <div class="sheet-h">
+    <h3 id="sheet-title"></h3>
+    <button onclick="UI.closeSheet()">Done</button>
+  </div>
+  <div class="sheet-b" id="sheet-body"></div>
+</div>
+<div class="toast" id="toast"></div>
+

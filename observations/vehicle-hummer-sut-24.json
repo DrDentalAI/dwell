@@ -1,0 +1,29 @@
+{
+  "id": "vehicle-hummer-sut-24",
+  "type": "vehicle",
+  "libraryId": "gmc-hummer-sut-24",
+  "vin": "1GT40DDA2SU108062",
+  "description": "2025 GMC Hummer EV Pickup (SUT), 3X trim, 24-module pack. The vehicle every observation in this directory was recorded on.",
+  "specs": {
+    "usableKWh": 212.7,
+    "modules": 24,
+    "cells": 576,
+    "chemistry": "NCMA",
+    "cathode": "~89% Ni / 5% Co / 5% Mn / 1% Al",
+    "packArchitectureV": 800,
+    "packLayout": "dual-stack",
+    "acMaxKW": 19.2,
+    "peakDcKW": 350,
+    "nativeDC": "CCS1",
+    "epaRangeMi": 381,
+    "epaRangeConfidence": "epa"
+  },
+  "source": "EV-Battery-Chemistry-Guide.md (21 Aug 2026), VIN decode, owner",
+  "notes": [
+    "Chemistry is NCMA, not LFP. Relevant to taper shape and to charge-ceiling advice: 80% daily is correct here and would be wrong for an LFP pack.",
+    "EPA 381 mi applies to MY2024 onward. The 2022 Edition 1 was quoted 329 mi and the 2023 3X 355 mi, both GM estimates -- at over 8,500 lb GVWR these trucks were exempt from EPA range labelling.",
+    "MODEL YEAR IS 2025 AND THE TRIM IS 3X. The library entry gmc-hummer-sut-24 spans MY2022-2026 because the 24-module variant was sold across all of them; that span is correct for the catalogue and must not be narrowed to this one truck. This file is the authority on which specific vehicle the observations came from."
+  ],
+  "modelYear": 2025,
+  "trim": "3X"
+}

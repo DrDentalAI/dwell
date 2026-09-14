@@ -1,0 +1,13 @@
+{
+  "id": "ac-chargepoint-208v",
+  "type": "ac-observation",
+  "vehicle": "vehicle-hummer-sut-24",
+  "description": "A workplace ChargePoint badged 7.7 kW that delivers 6.4-6.6 kW.",
+  "station": { "network": "ChargePoint", "badgedKW": 7.7, "badgedAmps": 32, "connector": "J1772" },
+  "observedKW": 6.5,
+  "observedRange": [6.4, 6.6],
+  "readLocation": "charger",
+  "explanation": "208 V commercial three-phase service rather than 240 V single-phase. 208 x 32 = 6.66 kW. The badge assumes 240 V. This is the single most common cause of 'why is this slower than the sticker says' at workplaces and parking structures, and it is not discoverable from any spec sheet.",
+  "source": "Owner observation",
+  "confidence": "reported"
+}

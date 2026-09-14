@@ -1,0 +1,16 @@
+{
+  "id": "range-readings-hummer",
+  "type": "range-readings",
+  "vehicle": "vehicle-hummer-sut-24",
+  "description": "Dash range readings at 100% charge. These are the truck's rolling estimate from recent driving, NOT a capacity measurement -- the same pack reads differently in different seasons and with different driving. Recorded as a band, never as a number.",
+  "epaRangeMi": 381,
+  "epaConfidence": "epa",
+  "readings": [
+    { "season": "winter", "rangeMi": 373, "ambientC": -7, "ambientAssumed": true },
+    { "season": "summer", "rangeMi": 403, "ambientC": 28, "ambientAssumed": true, "date": "2026-08-12", "note": "Read immediately after the KATHLEEN session. Odometer 40087 mi." }
+  ],
+  "spread": "373 to 403 mi, about 8%, against an EPA rating of 381 that sits between them.",
+  "caution": "Both ambient temperatures are assumed, not instrumented. Any temperature-versus-efficiency fit built on these two points inherits that softness and should widen its band accordingly.",
+  "source": "Owner observation",
+  "confidence": "reported"
+}

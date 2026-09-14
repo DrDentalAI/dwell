@@ -1,0 +1,34 @@
+{
+  "id": "anchors-hummer-sut-24",
+  "type": "spot-readings",
+  "vehicle": "vehicle-hummer-sut-24",
+  "description": "Individual power readings taken outside a fully logged session. Each constrains the curve at one SOC only. Listed separately from sessions because a spot reading carries far less information than a timed session -- it says nothing about duration or energy.",
+  "readings": [
+    {
+      "id": "349kw-at-13",
+      "soc": 13,
+      "deliveredKW": 349,
+      "station": { "network": "EVgo", "ratedKW": 350, "maxVoltage": 1000, "connector": "CCS1" },
+      "constrainsNativeCurve": true,
+      "note": "On a true 1000 V-class post, so the pack was not voltage-limited. This is the strongest single anchor in the set and it is the only thing holding up the bottom half of the curve.",
+      "source": "Owner observation, corroborated in EV-Battery-Chemistry-Guide.md",
+      "confidence": "reported"
+    },
+    {
+      "id": "183kw-at-40-teslav3",
+      "soc": 40,
+      "deliveredKW": 183,
+      "station": { "network": "Tesla", "generation": "V3", "ratedKW": 250, "maxVoltage": 500, "connector": "NACS_DC" },
+      "adapter": "GM NACS DC adapter, 500 A / 1000 V",
+      "constrainsNativeCurve": false,
+      "note": "DOES NOT CONSTRAIN THE NATIVE CURVE. A V3 is a 400 V-class cabinet, so the 800 V pack charged in split halves. This measures the station's voltage class, not the truck. The adapter was not the limit either -- GM's is 500 A / 1000 V and is never the bottleneck. Useful for validating lowVoltStationMaxKW; useless for curve shape.",
+      "source": "Owner observation, corroborated in EV-Battery-Chemistry-Guide.md",
+      "confidence": "reported"
+    }
+  ],
+  "coverage": {
+    "note": "Combined with the KATHLEEN session, measured coverage of this vehicle's curve is: one point at 13%, one window from 62% to 100%, and nothing at all between 13% and 62%. That gap is why the curve is labelled estimated.",
+    "measuredSOCRanges": [[13, 13], [62, 100]],
+    "unmeasuredSOCRanges": [[0, 13], [13, 62]]
+  }
+}
