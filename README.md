@@ -15,6 +15,7 @@ decisions with version state, so it went stale on contact.)
 | `ev-core.js` | Calculation engine. Pure JS, zero dependencies, no DOM. |
 | `ev-library.js` | Vehicles, adapters, station presets. |
 | `ev-pricing.js` | **Sole rate authority.** Networks, tariffs, taxes, idle fees. |
+| `ev-discounts.js` | Eligibility and discount **percentages**. Applies *to* what pricing resolves; never resolves a rate itself. |
 | `src/` | Front end — `app.js`, `app.css`, `app.html`. |
 | `build.js` | Inlines everything into a single self-contained `index.html`. |
 | `observations/` | **Raw measured data. Append-only. The only irreplaceable part.** |

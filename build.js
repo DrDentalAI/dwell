@@ -13,7 +13,7 @@ const p = f => fs.readFileSync(__dirname + '/' + f, 'utf8').replace(/\n$/, '');
 
 /* Bump VERSION whenever something user-visible changes. The build stamp is
    generated here so the phone can prove which copy it is actually running. */
-const VERSION = '1.11.2';
+const VERSION = '1.12.0';
 const now = new Date();
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const pad = n => String(n).padStart(2, '0');
@@ -24,6 +24,7 @@ const BUILT = process.env.BUILT ||
 const core    = p('ev-core.js');
 const lib     = p('ev-library.js');
 const pricing = p('ev-pricing.js');
+const discounts = p('ev-discounts.js');
 const css     = p('src/app.css');
 const js      = p('src/app.js')
   .replace(/__APP_VERSION__/g, VERSION)
@@ -85,6 +86,45 @@ if (minted.length)
   throw new Error('build: the UI may only demote a curve to \'user\', never mint a ' +
     'stronger label:\n  ' + minted.join('\n  '));
 
+/* ---- RATE AUTHORITY GATE ------------------------------------------------
+   ev-pricing.js is the sole rate authority. A rackRate in ev-discounts.js for
+   a network pricing already covers is a second, unsourced price that can only
+   disagree with the first -- IONNA carried $0.48 here against $0.39 published
+   there. Fail the build rather than ship two prices for one network. */
+const EVDiscounts = require('./ev-discounts.js');
+const dupRates = Object.keys(EVDiscounts.NETWORKS).filter(k => {
+  const n = EVDiscounts.NETWORKS[k];
+  return n.rackRate && (n.pricingId != null);
+});
+if (dupRates.length)
+  throw new Error('build: ev-discounts.js carries a rackRate for a network ' +
+    'ev-pricing.js already prices: ' + dupRates.join(', ') +
+    '. Pricing is the sole rate authority — delete the rackRate.');
+
+/* Any surviving rackRate must be tagged, so the UI can never show an estimated
+   national average that looks identical to a published per-station rate. */
+const untagged = Object.keys(EVDiscounts.NETWORKS).filter(k => {
+  const n = EVDiscounts.NETWORKS[k];
+  return n.rackRate && !n.rackRateNote;
+});
+if (untagged.length)
+  throw new Error('build: untagged estimated rate in ev-discounts.js: ' +
+    untagged.join(', ') + '. Add rackRateNote so the UI can label it.');
+
+/* One provenance vocabulary across the app -- discounts AND networks. The
+   first version of this gate checked only DISCOUNTS and sailed straight past a
+   legacy 'reported' sitting on a NETWORKS entry. A gate that covers half the
+   file is worse than no gate: it reports success. */
+const badConf = []
+  .concat(EVDiscounts.DISCOUNTS.map(d => ({ where: 'discount ' + d.id, c: d.confidence })))
+  .concat(Object.keys(EVDiscounts.NETWORKS)
+    .map(k => ({ where: 'network ' + k, c: EVDiscounts.NETWORKS[k].confidence })))
+  .filter(x => x.c && EVDiscounts.CONFIDENCE.indexOf(x.c) === -1)
+  .map(x => x.where + " ('" + x.c + "')");
+if (badConf.length)
+  throw new Error('build: confidence outside the shared vocabulary [' +
+    EVDiscounts.CONFIDENCE.join(', ') + ']: ' + badConf.join(', '));
+
 const ICON = `data:image/svg+xml,${encodeURIComponent(
 `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180"><rect width="180" height="180" rx="40" fill="#0A0D12"/><path d="M100 24L54 100h30l-8 56 46-76H92z" fill="#3DDC97"/></svg>`)}`;
 
@@ -123,6 +163,8 @@ ${core}
 ${lib}
 /* ---- charging network pricing ---- */
 ${pricing}
+/* ---- discount eligibility (applies TO pricing, never instead of it) ---- */
+${discounts}
 /* ---- front end ---- */
 ${js}
 </script>
