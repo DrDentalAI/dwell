@@ -83,6 +83,24 @@ function load() {
       if (!Array.isArray(S.stations)) S.stations = [];
       S.session.pricing = Object.assign({ networkId:null, planId:null, regionId:null, userRate:null },
                                         (p.session || {}).pricing || {});
+      /* FORWARD MIGRATION. Every release that adds a key to the session adds a
+         trap for the release before it: the saved blob predates the key, the
+         new code dereferences it, and the app dies on open for everyone
+         upgrading -- which is every user. v1.12.0 added `eligibility` and
+         v1.12.1 shipped a crash on that path.
+
+         So do not trust ANY nested object to exist just because the code that
+         writes it does. Rebuild each one from its default and overlay whatever
+         was saved. Adding a key here is the cost of adding a key to the
+         session, and it is much cheaper than a dead app. */
+      const dflt = DEFAULT_SESSION();
+      ['eligibility'].forEach(k => {
+        S.session[k] = Object.assign({}, dflt[k] || {}, (p.session || {})[k] || {});
+      });
+      const eg = S.session.eligibility;
+      if (!Array.isArray(eg.memberships)) eg.memberships = [];
+      if (!Array.isArray(eg.cards)) eg.cards = [];
+      if (!eg.gig || typeof eg.gig !== 'object') eg.gig = { platform: null, tier: null };
     }
   } catch (e) {}
   if (!Array.isArray(S.stations)) S.stations = [];
@@ -544,18 +562,24 @@ baseRate(n) {
    Tax lands on the discounted subtotal, never on the rack rate, and never
    folded into the per-kWh figure.                                        */
 discountProfile() {
-  const v = this.currentVehicle();
+  /* `activeVehicle()`, not `this.currentVehicle()`. v1.12.1 shipped the latter,
+     which exists nowhere in this file, so the first line of this function threw
+     for every user who had a charging network selected. Every engine test
+     passed; none of them ever opened the page. See test/smoke.js. */
+  const v = activeVehicle();
   const pl = S.place || {};
-  const el = S.session.eligibility || {};
+  const sess = S.session || {};
+  const el = sess.eligibility || {};
+  const pricing = sess.pricing || {};
   return {
     region: pl.province ? 'CA' : 'US',
     make: v ? v.make : null,
     model: v ? v.model : null,
     modelYear: v ? v.modelYear : null,
-    memberships: (el.memberships || []).concat(
-      S.session.pricing.planId ? [S.session.pricing.planId] : []),
+    memberships: (Array.isArray(el.memberships) ? el.memberships : [])
+      .concat(pricing.planId ? [pricing.planId] : []),
     gig: el.gig && el.gig.platform ? el.gig : null,
-    cards: el.cards || []
+    cards: Array.isArray(el.cards) ? el.cards : []
   };
 },
 
@@ -768,8 +792,17 @@ costHTML(res) {
      the selected membership plan and any eligibility discount; pricing then
      applies that single percentage to every TOU window, sums the subtotal,
      and taxes the subtotal. Tax is never folded into the per-kWh rate. */
-  const dres = this.currentDiscount();
-  const eff = this.effectivePlan(dres);
+  /* Discounts are an enhancement on top of a price. If anything in that layer
+     throws, the driver should still be told what the session costs at the rack
+     rate -- a missing discount is a smaller failure than a missing answer. */
+  let dres = null, eff = { plan: this.currentPlan(), source: null, pct: 0 }, discErr = null;
+  try {
+    dres = this.currentDiscount();
+    eff = this.effectivePlan(dres);
+  } catch (err) {
+    discErr = err;
+    if (typeof console !== 'undefined') console.error('discount layer failed', err);
+  }
   const c = P.sessionCost(sim, rate, { plan: eff.plan, dwellMinutes: dwell, network: net,
     startClockMinutes: E.parseClock(S.session.plugInTime) });
 
@@ -858,7 +891,11 @@ costHTML(res) {
       <br>Roughly ${P.money(conv, other)} in ${other} at ${S.fx.USD_CAD} (as of ${h(S.fx.asOf)}) — converted, not a native price.</div>
     ${idleWarn}
     ${c.stale ? `<div class="note warn" style="margin-top:11px">&#9888; This rate was last verified ${c.ageDays} days ago and may be outdated.</div>` : ''}
-  </div>${this.discountHTML(dres)}`;
+  </div>${discErr
+    ? `<div class="card"><div class="note bad"><b>Discounts unavailable.</b>
+        The price above is the full rate with no discount applied, so it is the
+        safe direction to be wrong in. ${h(discErr.message || '')}</div></div>`
+    : this.discountHTML(dres)}`;
 },
 
 /* ------------------------------------------- MEMBERSHIP COMPARISON SHEET */
@@ -2684,19 +2721,61 @@ init() {
   // Proof of life: if scripts never ran, this banner stays on screen and tells
   // the user exactly what is wrong instead of leaving them poking a dead page.
   const bf = $('boot-fail'); if (bf) bf.remove();
+  /* A RENDER FAILURE MUST NOT COST THE USER THE APP.
+
+     v1.12.1 threw inside a render path reached from init(). The banner below
+     fired correctly and said exactly what was wrong -- and the app was still
+     dead, because the throw abandoned the render half-finished and nothing
+     usable was ever painted. A good error message on a blank screen is still a
+     blank screen.
+
+     So: try once normally. If that throws, say so, then try AGAIN in safe mode
+     with the saved session reset to defaults. Almost every startup crash of
+     this shape is saved state meeting newer code, and a fresh session clears it
+     without touching the garage or the observations. Only if the second attempt
+     also fails is the app genuinely unusable -- and even then the reset control
+     stays on screen. */
+  const report = (e, mode) => {
+    const m = document.querySelector('main');
+    if (!m) return;
+    m.insertAdjacentHTML('afterbegin',
+      `<div class="note bad"><b>The app hit an error while starting${mode ? ' (' + mode + ')' : ''}.</b><br>
+       <code style="font-size:11.5px;word-break:break-word">${h(e && e.stack || e)}</code><br><br>
+       <button class="btn sm" onclick="UI.hardReset()">Reset saved data and reload</button>
+       <br><span class="s">Your garage and saved rates are stored separately and survive a session reset.</span></div>`);
+  };
+
   try {
     load();
     this.go(S.tab || 'plan');
     this.renderAll();
+    return;
   } catch (e) {
-    // Never fail silently. Show the actual error so it can be reported.
+    if (typeof console !== 'undefined') console.error('startup failed, retrying in safe mode', e);
+    report(e, null);
+  }
+
+  try {
+    S.session = DEFAULT_SESSION();
+    S.finder = { open:false, q:'', live:[], busy:false, error:null };
+    this.go('plan');
+    this.renderAll();
     const m = document.querySelector('main');
     if (m) m.insertAdjacentHTML('afterbegin',
-      `<div class="note bad"><b>The app hit an error while starting.</b><br>
-       <code style="font-size:11.5px;word-break:break-word">${h(e && e.stack || e)}</code><br><br>
-       Send me this message and I can fix it.</div>`);
-    throw e;
+      `<div class="note warn"><b>Started in safe mode.</b> Your saved session could not
+       be restored, so it was reset to defaults. Your vehicles and saved rates are
+       untouched. Set your charger and dwell time again and it will work normally.</div>`);
+  } catch (e2) {
+    if (typeof console !== 'undefined') console.error('safe mode also failed', e2);
+    report(e2, 'safe mode');
   }
+},
+
+/* Last resort, offered by the startup banner. Clears the stored blob only --
+   nothing here reaches observations/, which lives in the repo, not the phone. */
+hardReset() {
+  try { localStorage.removeItem(KEY); } catch (e) {}
+  location.reload();
 }
 };
 
