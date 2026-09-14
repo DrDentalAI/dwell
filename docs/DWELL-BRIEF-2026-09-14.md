@@ -208,12 +208,22 @@ falls back to manual entry or a built-in list when it can't:
 |---|---|---|
 | NHTSA vPIC | VIN decode | free, no key |
 | Open-Meteo | current temperature | free, no key |
-| `developer.nrel.gov` | nearby DC station finder | ships a **shared `DEMO_KEY`** that rate-limits under load; a personal key is free and lifts the limit |
+| `developer.nlr.gov` | nearby DC station finder | ships a **shared `DEMO_KEY`** that rate-limits under load; a personal key is free from `developer.nlr.gov/signup` and lifts the limit |
 
-The NREL call is the one to watch. A shared demo key is a shared quota, so it will
-start returning 429 exactly when usage grows. It degrades to the built-in station
-list rather than failing, which is correct, but it is the only dependency in the
-app whose reliability gets *worse* as the app gets more popular.
+**NLR, formerly NREL.** The Department of Energy renamed the National Renewable
+Energy Laboratory to the **National Laboratory of the Rockies** and moved its
+developer network to `developer.nlr.gov`. DNS for `nrel.gov` and all subdomains
+ceased to resolve and does **not** redirect — the old host is gone, not slow.
+Only the host changed: paths, parameters, response shape and existing API keys
+are unaffected.
+
+The station-finder call is the one to watch, and it has now proved it twice over.
+A shared demo key is a shared quota, so it returns 429 exactly when usage grows.
+And the host itself moved out from under a shipped build inside a month. It
+degrades to the built-in station list rather than failing, which is correct, but
+it is the only dependency in the app whose reliability gets *worse* as the app
+gets more popular — and the only one that can be broken by someone else's
+decision.
 
 The first two are scope discipline. The last two are the real gaps for a
 commercial product — see §7.

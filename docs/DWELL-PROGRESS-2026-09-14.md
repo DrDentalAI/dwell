@@ -123,50 +123,97 @@ nested copy. Drag **contents**, and be in the right folder first.
 
 ---
 
-## 4a. Watch item — the NREL domain
+## 4a. RESOLVED — the station-finder host moved (NREL → NLR)
 
-**No action. Do not rewrite the endpoint.** `developer.nrel.gov` resolves and
-serves, and its live documentation still lists
-`developer.nrel.gov/api/alt-fuel-stations/v1.json`. The station finder is
-correct as shipped and was not touched.
+**Fixed in v1.12.0. The endpoint was updated.** An earlier draft of this section
+said the opposite; that draft was wrong and has been replaced.
 
-What is worth knowing: **`developer.nlr.gov` also exists, with a working signup
-and NLR branding**, so a migration may be underway. Nothing has been announced
-and nothing is broken.
+The Department of Energy renamed the National Renewable Energy Laboratory to the
+**National Laboratory of the Rockies**, and the developer network moved hosts.
+Confirmed against DOE's own announcement and NLR's published domain-transition
+notice, not against a browser error:
+
+> *"DNS for the `nrel.gov` domain and all subdomains ceased to resolve and will
+> not redirect."*
+
+There is no fallback to try. The old host is **gone, not slow**. Phased
+transition: new domain available 2 Mar 2026, `410 Gone` brownouts 1–28 May, old
+domain expired **29 May 2026**.
+
+### What changed, and what explicitly did not
 
 | | |
 |---|---|
-| Current endpoint (unchanged) | `developer.nrel.gov/api/alt-fuel-stations/v1/nearest.json` |
-| Signup, current | `https://developer.nrel.gov/signup/` |
-| Signup, possible successor | `https://developer.nlr.gov/signup/` |
+| Host | `developer.nrel.gov` → **`developer.nlr.gov`** |
+| Path | `/api/alt-fuel-stations/v1/nearest.json` — **unchanged** |
+| Parameters | `api_key, fuel_type, ev_charging_level, latitude, longitude, radius, limit, status, access` — **unchanged** |
+| Response | `fuel_stations[]` → `ev_network`, `ev_charging_units[].connectors{}.power_kw` — **unchanged** |
+| API keys | **still valid**: *"only the domain in the URL needs to be updated"* |
+| Signup | `https://developer.nlr.gov/signup/` |
 
-**If the station finder ever fails, check the domain first.** The call already
-degrades to the built-in station list rather than erroring, so a domain change
-would show up as "live lookup stopped working" rather than a crash — which is
-exactly the kind of failure that gets misdiagnosed.
+Checked against the new docs rather than assumed, because "only the host changed"
+is exactly the sort of claim that turns out to be 90% true.
 
-### The lesson, which is bigger than the domain
+`nrelKey` is **deliberately left as the localStorage field name.** Renaming it
+would orphan every personal API key users have already saved, to cosmetically
+match a lab's new branding. The user-visible copy says NLR; the storage key does
+not move.
 
-This watch item began as a bug report: an `ERR_NAME_NOT_RESOLVED` observed
-directly, read as a dead domain. It was **a local DNS failure**. Working code
-was nearly rewritten on the strength of it.
+### Graceful degradation — confirmed, not assumed
 
-> **"Physical observation beats published specs" is a good rule, and it just
-> produced a false positive.** A DNS failure and a dead domain are
-> indistinguishable from the client. The observation was real; the inference
-> was not.
+Offline-first means a dead endpoint must not break the tab. Three failure paths,
+all pre-existing, all verified:
 
-This is the same failure the project has hit repeatedly, wearing different
-clothes: acting on a single data point. It produced the `observed` curve label
-three times, and the phantom $0.99 session fee once. The rule that catches it is
-already written down — *one session is data, not a calibration* — and it applies
-to infrastructure exactly as it applies to charging curves. **Before acting on a
-single observation, check whether the instrument is the thing that broke.**
+- **DNS failure / CORS** — `fetch` throws, caught, renders *"Could not reach the
+  station database from this browser. The built-in list above still works."*
+- **429** — names the shared-quota problem and points at the free personal key.
+- **404 / 410** — **added this build.** The brownout period returned `410 Gone`,
+  which previously fell into the generic branch and reported a bare status code.
+  It now says the database moved and this build points at the old address, which
+  is the one message that would actually have led someone to the fix.
 
-Corollary, and the sharper form of the governing test in brief §8: **a
-third-party endpoint is a recurring verification burden.** Static tables pass
-that test. This one does not — it merely fails gracefully, which is not the same
-thing.
+The finder is an enhancement over a built-in station list that always renders.
+The tab does not depend on the network at any point.
+
+### The governing test, proving itself
+
+Brief §8 asks of any feature: *does this create a recurring cost or a recurring
+verification burden?* Static tables pass. Third-party endpoints fail.
+
+This one **broke inside a month of being documented**, through no fault of the
+code, by a decision made by someone else entirely. That is the burden, arriving
+on schedule. It is still worth keeping — it degrades cleanly and the built-in
+list carries the feature — but it should be the last dependency of its kind, and
+anything proposed that looks like it should be held to this example.
+
+### The epistemics, honestly
+
+The sequence is worth recording, because the project keeps relitigating how much
+a single observation is worth:
+
+1. `ERR_NAME_NOT_RESOLVED` observed → reported as a dead domain. **Correct.**
+2. Retracted as a local DNS fault, with an instruction not to rewrite anything.
+   **Incorrect** — and it came with a confident causal story.
+3. Re-reported on two networks, then **settled by checking DOE's announcement and
+   NLR's transition notice.**
+
+The first instinct was right and the correction was wrong, so the lesson is *not*
+"distrust single observations." Both the report and the retraction were single
+data points, and counting them would have picked the wrong one twice.
+
+> **What resolved it was a primary source, not a tally of observations.** A DNS
+> failure and a decommissioned domain are indistinguishable from the client — no
+> amount of re-observing from the same vantage point separates them. The
+> adjudicating evidence was never going to come from the browser.
+
+The existing rule already covers this if read properly: *one session is data, not
+a calibration.* Data tells you something is worth investigating. It does not tell
+you what is true. **Go to the authority; don't re-measure with the instrument
+that is itself in question.**
+
+The cost of getting this wrong was asymmetric and worth noting: acting on the
+false retraction would have left a shipped build pointing at a dead host with no
+diagnostic message. Verification cost two web searches.
 
 ---
 
@@ -233,8 +280,9 @@ claimed by anyone. **This is the single highest-value unfinished piece.**
   label.
 - Losing source because only the built artifact was committed.
 - Trusting a number because it looked plausible. See §2.
-- Acting on a single observation without checking whether the instrument broke.
-  See §4a.
+- Settling a factual question by re-observing instead of checking a primary
+  source. See §4a — the first report was right, the confident retraction was
+  wrong, and only DOE's own announcement separated them.
 
 ---
 
@@ -262,7 +310,10 @@ copyable block. Always include: what changed **with the number that proves it**;
 what is blocked or needs a decision; and an upload verdict in one of two forms.
 
 **UPLOAD THE PROGRESS FILE — `ev-discounts.js` moved out of `pending/` and is now
-integrated and gated, the queue reordered around a newly-surfaced blocker (the
-eligibility profile has no UI), and §2 and §4a each record a general rule — about
-plausible wrong numbers, and about acting on a single observation — that belongs
-in the project's memory rather than a chat log.**
+integrated and gated; the station-finder host changed from `developer.nrel.gov`
+to `developer.nlr.gov` and the old host no longer resolves, which invalidates any
+older build; the queue reordered around a newly-surfaced blocker (the eligibility
+profile has no UI); and §2 and §4a each record a general rule — about plausible
+wrong numbers, and about settling questions with a primary source rather than a
+repeated observation — that belongs in the project's memory rather than a chat
+log.**
