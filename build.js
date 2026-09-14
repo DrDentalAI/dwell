@@ -13,7 +13,7 @@ const p = f => fs.readFileSync(__dirname + '/' + f, 'utf8').replace(/\n$/, '');
 
 /* Bump VERSION whenever something user-visible changes. The build stamp is
    generated here so the phone can prove which copy it is actually running. */
-const VERSION = '1.12.0';
+const VERSION = '1.12.1';
 const now = new Date();
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const pad = n => String(n).padStart(2, '0');

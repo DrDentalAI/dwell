@@ -3957,8 +3957,8 @@ const $ = id => document.getElementById(id);
 const h = s => String(s == null ? '' : s).replace(/[&<>"']/g, c =>
   ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 const KEY = 'evdwell.v1';
-const VERSION = '1.12.0';
-const BUILT = '14 Sep 2026, 19:59 UTC';
+const VERSION = '1.12.1';
+const BUILT = '14 Sep 2026, 20:02 UTC';
 
 /* ------------------------------------------------------------------ STATE */
 const DEFAULT_SESSION = () => ({
@@ -3998,7 +3998,7 @@ let S = {
   rates: [],                      // your own named rate cards
   place: null,                    // {country,state|province,postal} from a ZIP
   touOverrides: {},               // your corrected time-of-day windows
-  nrelKey: null,                  // optional: your own federal API key
+  nrelKey: null,                  // optional: your own federal API key (NLR, formerly NREL)
   displayCurrency: null,          // null = show each rate in its native currency
   session: DEFAULT_SESSION(), trip: DEFAULT_TRIP(), trips: [], tab: 'plan'
 };
@@ -5350,13 +5350,26 @@ async findNearby() {
     return fail('Location was refused or timed out. The built-in list above still works.');
   }
   const key = S.nrelKey || 'DEMO_KEY';
-  const url = `https://developer.nrel.gov/api/alt-fuel-stations/v1/nearest.json` +
+  /* HOST CHANGED 2026. DOE renamed NREL to the National Laboratory of the
+     Rockies; the developer network moved to developer.nlr.gov and DNS for
+     nrel.gov and every subdomain "ceased to resolve and will not redirect".
+     There is no fallback to try -- the old host is gone, not slow.
+
+     Only the HOST changed. Verified against the new docs rather than assumed:
+     path /api/alt-fuel-stations/v1/nearest.json, every parameter below, the
+     fuel_stations[] envelope and the ev_charging_units[].connectors{}.power_kw
+     shape this function reads are all unchanged, and existing API keys keep
+     working -- "only the domain in the URL needs to be updated". */
+  const url = `https://developer.nlr.gov/api/alt-fuel-stations/v1/nearest.json` +
     `?api_key=${encodeURIComponent(key)}&fuel_type=ELEC&ev_charging_level=dc_fast` +
     `&latitude=${pos.coords.latitude}&longitude=${pos.coords.longitude}` +
     `&radius=25&limit=25&status=E&access=public`;
   try {
     const resp = await fetch(url);
     if (resp.status === 429) return fail('The shared demo key is used up for now. Add your own free key at the bottom of the Garage tab, or use the built-in list.');
+    if (resp.status === 404 || resp.status === 410)
+      return fail('The station database has moved and this build is pointing at the old address. ' +
+                  'The built-in list above still works. (Federal host change — see the note in Settings.)');
     if (!resp.ok) return fail(`Station lookup failed (${resp.status}). The built-in list above still works.`);
     const data = await resp.json();
     S.finder.live = (data.fuel_stations || []).map(f => {
@@ -6079,7 +6092,7 @@ renderBuildInfo() {
              oninput="UI.setNrelKey(this.value)">
       <p class="hint">"Search near me" uses the US Department of Energy's free station
         database. Without a key it shares a demo allowance that runs out quickly.
-        A personal key is free from developer.nrel.gov/signup and lifts the limit.
+        A personal key is free from developer.nlr.gov/signup and lifts the limit.
         Everything else in this app works with no key and no signal.</p>
     </div>
   </div>`;
