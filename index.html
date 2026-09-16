@@ -3957,8 +3957,8 @@ const $ = id => document.getElementById(id);
 const h = s => String(s == null ? '' : s).replace(/[&<>"']/g, c =>
   ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 const KEY = 'evdwell.v1';
-const VERSION = '1.13.0';
-const BUILT = '16 Sep 2026, 03:00 UTC';
+const VERSION = '1.14.0';
+const BUILT = '16 Sep 2026, 04:28 UTC';
 
 /* ------------------------------------------------------------------ STATE */
 const DEFAULT_SESSION = () => ({
@@ -5317,7 +5317,8 @@ renderFinder() {
           <div class="sub">${h([r.admin1, r.country_code].filter(Boolean).join(', '))}</div></div></button>`).join('')}
       </div>` : ''}
 
-    ${S.finder.error ? `<div class="note bad" style="margin-top:10px">${h(S.finder.error)}</div>` : ''}
+    ${S.finder.error ? `<div class="note bad" style="margin-top:10px">${h(S.finder.error)}</div>
+      ${S.nrelKeyState && S.nrelKeyState.entering ? this.keyNudgeHTML() : ''}` : ''}
     ${this.liveResultsHTML()}`;
 },
 
@@ -5362,7 +5363,8 @@ liveResultsHTML() {
   return `<div class="rows" style="margin-top:10px">${live.map(row).join('')}</div>
     <p class="hint">${S.finder.liveLabel ? `Near <b>${h(S.finder.liveLabel)}</b>. ` : ''}Live results from the
       US Department of Energy's station database. It publishes hardware, not prices \u2014 no free
-      source publishes live per-station rates, so set the price yourself once and it sticks.</p>`;
+      source publishes live per-station rates, so set the price yourself once and it sticks.</p>
+    ${this.keyNudgeHTML()}`;
 },
 
 toggleFinder() { S.finder.open = !S.finder.open; this.renderFinder(); },
@@ -5389,7 +5391,116 @@ setPlace(v) {
   if (hint) hint.innerHTML = this.placeHintHTML();
   this.renderOutput();
 },
-setNrelKey(v) { S.nrelKey = String(v || '').trim() || null; save(); },
+/* One builder for the key field, used by the Settings disclosure and by the
+   in-context prompts. A second copy would drift. */
+keyFieldHTML() {
+  const st = S.nrelKeyState || {};
+  const badge = st.status === 'ok' ? `<span class="tag published">key accepted</span>`
+    : st.status === 'bad' ? `<span class="tag" style="background:rgba(255,90,90,.15);color:var(--bad)">rejected</span>`
+    : st.status === 'checking' ? `<span class="s">checking\u2026</span>` : '';
+  return `<label class="fl">Your own key ${badge}</label>
+    <input type="text" id="nrel-key" placeholder="paste the whole line \u2014 I'll find the key"
+           value="${h(S.nrelKey || '')}" autocapitalize="off" autocorrect="off" spellcheck="false"
+           onchange="UI.setNrelKey(this.value)">
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <a class="btn sm ghost" style="flex:1;text-align:center;text-decoration:none"
+         href="https://developer.nlr.gov/signup/" target="_blank" rel="noopener">Get a free key</a>
+      <button class="btn sm" style="flex:1" onclick="UI.setNrelKey(document.getElementById('nrel-key').value)">Save &amp; check</button>
+    </div>
+    ${st.message ? `<p class="hint" style="margin-top:8px">${h(st.message)}</p>` : ''}
+    <p class="hint">The key is a 40-character string. Paste the whole email line or a
+      URL containing it &mdash; it gets picked out for you. Stored on this device only.</p>`;
+},
+
+/* The prompt shown UNDER A SUCCESSFUL RESULT, not only after a failure.
+   The docs say DEMO_KEY is "for initially exploring APIs prior to signing up ...
+   you're encouraged to signup for your own API key if you plan to use the API".
+   A user who has just searched successfully has finished exploring and is now
+   using it. That is the honest moment to ask -- and asking only on a 429 would
+   mean asking only when the app has just failed them. */
+keyNudgeHTML() {
+  if (S.nrelKey) return '';
+  if (S.nrelKeyState && S.nrelKeyState.dismissed) return '';
+  return `<div class="note" style="margin-top:10px">
+    Running on the <b>shared demo allowance</b> \u2014 about 30 lookups an hour for
+    your network, which is plenty for occasional use. A free key removes the limit.
+    <div style="display:flex;gap:8px;margin-top:9px">
+      <a class="btn sm ghost" style="flex:1;text-align:center;text-decoration:none"
+         href="https://developer.nlr.gov/signup/" target="_blank" rel="noopener">Get one</a>
+      <button class="btn sm ghost" style="flex:1" onclick="UI.openKeyEntry()">Paste key</button>
+      <button class="act" onclick="UI.dismissKeyNudge()">Not now</button>
+    </div>
+    ${S.nrelKeyState && S.nrelKeyState.entering ? `<div style="margin-top:11px">${this.keyFieldHTML()}</div>` : ''}
+  </div>`;
+},
+
+openKeyEntry() {
+  S.nrelKeyState = Object.assign({}, S.nrelKeyState, { entering: true });
+  this.renderFinder();
+  const el = $('nrel-key'); if (el) el.focus();
+},
+
+dismissKeyNudge() {
+  S.nrelKeyState = Object.assign({}, S.nrelKeyState, { dismissed: true });
+  save(); this.renderFinder();
+},
+
+/* A key is a 40-character string that arrives in an email or on a page. Making
+   someone select exactly 40 characters on a phone is real friction, so take
+   whatever they paste -- a whole line, a URL with api_key= in it -- and pull the
+   key out. Extract, never fabricate: if there is no 40-character run, say so. */
+extractKey(raw) {
+  const t = String(raw || '').trim();
+  if (!t) return null;
+  const m = t.match(/[A-Za-z0-9]{40}/);
+  return m ? m[0] : null;
+},
+
+async setNrelKey(v) {
+  const raw = String(v || '').trim();
+  if (!raw) {
+    S.nrelKey = null; S.nrelKeyState = { entering: true };
+    save(); this.renderFinder(); this.renderGarage(); return;
+  }
+  const key = this.extractKey(raw);
+  if (!key) {
+    S.nrelKeyState = { entering: true, status: 'bad',
+      message: 'No 40-character key found in that. Paste the line containing it, or the whole email.' };
+    this.renderFinder(); this.renderGarage(); return;
+  }
+
+  /* Verify with ONE real call before storing it as good. An unverified key that
+     silently does not work makes the next failure indistinguishable from the
+     last one -- the user thinks it is fixed and it is not. */
+  S.nrelKeyState = { entering: true, status: 'checking' };
+  this.renderFinder(); this.renderGarage();
+  let ok = false, why = '';
+  try {
+    const r = await fetch('https://developer.nlr.gov/api/alt-fuel-stations/v1/nearest.json' +
+      `?api_key=${encodeURIComponent(key)}&fuel_type=ELEC&latitude=42.33&longitude=-83.05&radius=1&limit=1`);
+    if (r.ok) ok = true;
+    else if (r.status === 403) why = 'That key was rejected by the station database.';
+    else if (r.status === 429) why = 'That key is over its limit right now. It may still be valid \u2014 try again in an hour.';
+    else why = `The check came back with HTTP ${r.status}.`;
+  } catch (e) {
+    why = 'Could not reach the station database to check the key. It has been saved unverified.';
+    S.nrelKey = key; save();
+    S.nrelKeyState = { entering: true, status: null, message: why };
+    this.renderFinder(); this.renderGarage(); return;
+  }
+
+  if (ok) {
+    S.nrelKey = key; save();
+    S.nrelKeyState = { status: 'ok', entering: false,
+      message: 'Key accepted. Live search no longer shares the demo allowance.' };
+  } else {
+    S.nrelKeyState = { entering: true, status: 'bad', message: why };
+  }
+  this.renderFinder(); this.renderGarage();
+},
+
+/* kept for callers that only need the raw setter */
+setNrelKeyRaw(v) { S.nrelKey = String(v || '').trim() || null; save(); },
 /* Was: re-render the whole finder, then grab focus back and force the caret to
    the end. That hid the focus loss and introduced a worse one -- the caret
    jumped to the end on every keystroke, so editing the middle of a query was
@@ -5465,7 +5576,11 @@ async findNearby() {
   } catch (e) {
     return fail('Location was refused or timed out. The built-in list above still works.');
   }
-  return this.stationsAt(pos.coords.latitude, pos.coords.longitude, null);
+  /* A GPS fix is a pair of coordinates and nothing else -- it does not say which
+     country you are standing in, and guessing 'US' is how Windsor drivers got an
+     empty list. 'all' is also simply correct along the Detroit-Windsor border,
+     where the nearest useful charger may be on the other side of the river. */
+  return this.stationsAt(pos.coords.latitude, pos.coords.longitude, null, 'all');
 },
 
 /* ---- DESTINATION SEARCH -----------------------------------------------
@@ -5529,13 +5644,18 @@ pickPlaceObj(hit) {
   const pf = S.finder.place;
   pf.label = [hit.name, hit.admin1, hit.country_code].filter(Boolean).join(', ');
   pf.results = [];
-  return this.stationsAt(hit.latitude, hit.longitude, pf.label);
+  /* The geocoder already told us the country, so pass it through rather than
+     asking the station API to assume. Anything other than US or CA is not in
+     the dataset at all -- fall back to 'all' and let the empty result be true. */
+  const cc = String(hit.country_code || '').toUpperCase();
+  return this.stationsAt(hit.latitude, hit.longitude, pf.label,
+                         (cc === 'US' || cc === 'CA') ? cc : 'all');
 },
 
 /* One station lookup, two ways in. Both the GPS button and the destination
    search land here, so the result list, the error handling and the graceful
    degradation are identical and there is only one of each to maintain. */
-async stationsAt(lat, lon, label) {
+async stationsAt(lat, lon, label, country) {
   S.finder.busy = true; S.finder.error = null;
   if (S.finder.place) S.finder.place.busy = false;
   this.renderFinder();
@@ -5546,13 +5666,27 @@ async stationsAt(lat, lon, label) {
      Rockies; DNS for nrel.gov and every subdomain ceased to resolve and does
      not redirect. Only the host changed -- path, parameters, response shape and
      existing keys are unaffected. */
+  /* `country` DEFAULTS TO 'US' IF OMITTED. Leaving it off is why live search in
+     Ontario returned nothing and reported it as a fact about Ontario rather than
+     a parameter we never sent -- a confident empty result, the worst kind of
+     wrong. Documented values: all | US | CA. Canadian stations are in the same
+     dataset; there is no second source. */
+  const cc = country || 'all';
   const url = `https://developer.nlr.gov/api/alt-fuel-stations/v1/nearest.json` +
     `?api_key=${encodeURIComponent(key)}&fuel_type=ELEC&ev_charging_level=dc_fast` +
+    `&country=${encodeURIComponent(cc)}` +
     `&latitude=${lat}&longitude=${lon}` +
     `&radius=25&limit=25&status=E&access=public`;
   try {
     const resp = await fetch(url);
-    if (resp.status === 429) return fail('The shared demo key is used up for now. Add your own free key at the bottom of the Garage tab, or use the built-in list.');
+    if (resp.status === 429) {
+      /* Carry the remedy, not a pointer to a tab. On cellular this can be caused
+         entirely by strangers -- carrier-grade NAT and iOS Private Relay pool
+         many subscribers behind one address, so "per IP" is not per user. */
+      S.nrelKeyState = Object.assign({}, S.nrelKeyState, { entering: true, dismissed: false });
+      return fail('The shared allowance for your network is used up for the next hour. ' +
+                  'A free key removes the limit \u2014 see below \u2014 or use the built-in list above.');
+    }
     if (resp.status === 404 || resp.status === 410)
       return fail('The station database has moved and this build is pointing at the old address. ' +
                   'The built-in list above still works. (Federal host change \u2014 see the note in Settings.)');
@@ -6276,13 +6410,17 @@ renderBuildInfo() {
     <div style="margin-top:11px;font-size:11px">Updated the file but still seeing this build?
       Swipe the app closed from the app switcher and reopen it.</div>
     <div style="margin-top:16px;text-align:left">
-      <label class="fl">Station-lookup key (optional)</label>
-      <input type="text" placeholder="DEMO_KEY" value="${h(S.nrelKey || '')}"
-             oninput="UI.setNrelKey(this.value)">
-      <p class="hint">"Search near me" uses the US Department of Energy's free station
-        database. Without a key it shares a demo allowance that runs out quickly.
-        A personal key is free from developer.nlr.gov/signup and lifts the limit.
-        Everything else in this app works with no key and no signal.</p>
+      <!-- Behind a disclosure, deliberately. Almost nobody needs this: the shared
+           allowance is 30 lookups per hour PER IP ADDRESS, not a pool shared
+           across all users, and live search is one lookup per deliberate button
+           press. A field on the main view implied setup was expected and created
+           friction the API never asked for. Present, not advertised. -->
+      <details>
+        <summary class="s" style="cursor:pointer">Station-lookup key ${S.nrelKey ? '&mdash; set' : '(not needed for most people)'}</summary>
+        <div style="margin-top:10px">
+          ${this.keyFieldHTML()}
+        </div>
+      </details>
     </div>
   </div>`;
 },
