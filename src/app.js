@@ -358,8 +358,53 @@ blankRate() {
     currency: n ? n.currency : 'USD',
     confidence: 'user',
     lastVerified: new Date().toISOString().slice(0, 10),
+
+    /* ---- MEASUREMENT PROVENANCE, applied to pricing --------------------
+       The same discipline the charging curves have carried since v1.11:
+       a number is worth what its source is worth, and an untagged number
+       cannot be distinguished from a different kind of number later.
+
+       `observedUnderPlan` is the load-bearing one. A price read off a
+       charger by a member IS the member price, and nothing downstream can
+       tell that from a rack rate unless it is recorded here. null means a
+       deliberate "no plan was active"; ABSENT means unknown and blocks any
+       further discount. Defaults to whatever plan is selected right now,
+       because that is what the charger in front of you is quoting. */
+    observedUnderPlan: S.session.pricing.planId || null,
+    observedBy: 'you',
+    observedOn: new Date().toISOString().slice(0, 10),
     note: 'Read off the charger.'
   };
+},
+
+/* "reported 14 Sep, EVgo Max" -- not a bare number. */
+rateProvenanceLine(rate, netId) {
+  if (!rate) return '';
+  const when = rate.observedOn || rate.lastVerified;
+  const net = netId ? P.findNetwork(netId) : this.currentNetwork();
+  let planName = null;
+  if ('observedUnderPlan' in rate) {
+    if (rate.observedUnderPlan) {
+      const pl = net && (net.plans || []).find(x => x.id === rate.observedUnderPlan);
+      planName = pl ? pl.name : rate.observedUnderPlan;
+    } else planName = 'no plan';
+  }
+  const age = P.ageDays({ lastVerified: when }, new Date());
+  const stale = age != null && age > P.STALE_DAYS;
+  const bits = [];
+  if (when) bits.push('reported ' + this.shortDate(when));
+  if (planName) bits.push(planName);
+  else bits.push('plan not recorded');
+  return `<span class="s">${h(bits.join(', '))}${
+    age != null ? ` \u00b7 ${age} day${age === 1 ? '' : 's'} ago` : ''}</span>${
+    stale ? `<br><span class="s" style="color:var(--locked);font-weight:600">&#9888; Over ${P.STALE_DAYS} days old. Charging prices move faster than this.</span>` : ''}${
+    !('observedUnderPlan' in rate) ? `<br><span class="s" style="color:var(--locked)">&#9888; Saved before the app tracked plans \u2014 no member discount will be applied to it. Re-save to clear.</span>` : ''}`;
+},
+
+shortDate(iso) {
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const p = String(iso || '').split('-');
+  return p.length === 3 ? `${Number(p[2])} ${M[Number(p[1]) - 1]}` : String(iso || '');
 },
 
 toggleUserPrice() {
@@ -500,6 +545,7 @@ saveRate() {
     networkId: S.session.pricing.networkId || null,
     place: S.place ? (S.place.state || S.place.province) : null,
     savedOn: new Date().toISOString().slice(0, 10),
+    observedUnderPlan: ('observedUnderPlan' in u) ? u.observedUnderPlan : undefined,
     rate: JSON.parse(JSON.stringify(u))
   };
   if (existing) Object.assign(existing, entry); else S.rates.push(entry);
@@ -843,7 +889,17 @@ costHTML(res) {
           : `no idle fee is published for this network, but check the charger.`)}
       </div>` : '';
 
-  const discLine = eff.pct > 0 ? `<div class="note ok" style="margin-top:0;margin-bottom:12px">
+  /* When the arithmetic gate refuses a discount, say so where the number is.
+     A price that silently stopped being discounted looks like a bug; a price
+     that explains why it is higher is the app doing its job. */
+  const gated = P.planRate(rate, eff.plan);
+  const gateLine = gated && gated.discountBlocked ? `<div class="note warn" style="margin-top:0;margin-bottom:12px">
+      <b>&#9888; Member discount not applied to this rate.</b><br>${h(gated.discountNote || '')}
+      ${gated.discountBlocked === 'untagged'
+        ? `<br><button class="btn sm" style="margin-top:9px" onclick="UI.openRateEditor()">Re-save this rate</button>` : ''}
+    </div>` : '';
+
+  const discLine = gated && gated.discountBlocked ? '' : eff.pct > 0 ? `<div class="note ok" style="margin-top:0;margin-bottom:12px">
       <b>${(eff.pct * 100).toFixed(0)}% off applied</b> — ${h(eff.source === 'discount'
         ? (dres.applied ? dres.applied.label : 'eligibility discount')
         : (eff.plan && eff.plan.name) || 'membership plan')}.
@@ -899,7 +955,7 @@ costHTML(res) {
   return `<div class="card">
     <div class="card-h"><h2>What this costs</h2>
       <span class="badge ${c.confidence === 'published' || c.confidence === 'user' ? 'solved' : 'locked'}">${h(c.confidence)}</span></div>
-    ${discLine}${stats}${breakdown}${touHTML}
+    ${gateLine}${discLine}${stats}${breakdown}${touHTML}
     <div class="hint" style="margin-top:9px">${h(net.name)}${plan ? ` · ${h(plan.name)}` : ''}
       · billed ${h(c.basis)}${c.taxIncluded ? ' · taxes included' : ''}
       <br>Roughly ${P.money(conv, other)} in ${other} at ${S.fx.USD_CAD} (as of ${h(S.fx.asOf)}) — converted, not a native price.</div>
@@ -1723,8 +1779,14 @@ async stationsAt(lat, lon, label, country) {
      wrong. Documented values: all | US | CA. Canadian stations are in the same
      dataset; there is no second source. */
   const cc = country || 'all';
+  /* ITEM 2: this was the literal string `dc_fast`, so the AC/DC toggle above it
+     changed nothing and the buttons were decorative. Documented values:
+     all | 1 | 2 | dc_fast. An AC session wants Level 2 (and Level 1), a DC
+     session wants dc_fast. */
+  const lvl = S.session.level === 'AC' ? '2' : 'dc_fast';
   const url = `https://developer.nlr.gov/api/alt-fuel-stations/v1/nearest.json` +
-    `?api_key=${encodeURIComponent(key)}&fuel_type=ELEC&ev_charging_level=dc_fast` +
+    `?api_key=${encodeURIComponent(key)}&fuel_type=ELEC` +
+    `&ev_charging_level=${encodeURIComponent(lvl)}` +
     `&country=${encodeURIComponent(cc)}` +
     `&latitude=${lat}&longitude=${lon}` +
     `&radius=25&limit=25&status=E&access=public`;
@@ -1757,10 +1819,14 @@ async stationsAt(lat, lon, label, country) {
     }).filter(r => r.name);
     S.finder.busy = false;
     S.finder.liveLabel = label;
-    if (!S.finder.live.length)
-      S.finder.error = label
-        ? `No DC fast chargers found within 25 miles of ${label}.`
-        : 'No DC fast chargers found within 25 miles.';
+    S.finder.liveLevel = lvl;
+    if (!S.finder.live.length) {
+      const what = lvl === '2' ? 'Level 2 chargers' : 'DC fast chargers';
+      S.finder.error = (label ? `No ${what} found within 25 miles of ${label}.`
+                              : `No ${what} found within 25 miles.`) +
+        ` Searching ${lvl === '2' ? 'AC / Level 2' : 'DC fast'} because that is the ` +
+        `session type selected above \u2014 switch it to look for the other kind.`;
+    }
     this.renderFinder();
   } catch (e) {
     // A CORS rejection surfaces here as a bare TypeError with no status.
