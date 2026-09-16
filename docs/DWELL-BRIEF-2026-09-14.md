@@ -209,7 +209,48 @@ them to, and each falls back to manual entry or a built-in list when it can't:
 | NHTSA vPIC | VIN decode | free, no key |
 | Open-Meteo forecast | current temperature | free, no key |
 | Open-Meteo geocoding | destination → coordinates for the station finder | free, no key, **same vendor as the temperature call — deliberately not a new dependency** |
-| `developer.nlr.gov` | nearby DC station finder | ships a **shared `DEMO_KEY`** that rate-limits under load; a personal key is free from `developer.nlr.gov/signup` and lifts the limit |
+| `developer.nlr.gov` | nearby DC station finder, **US and Canada** | defaults to `DEMO_KEY`; a personal key is free from `developer.nlr.gov/signup` and lifts the limit |
+
+**One dataset, both countries.** The stations endpoint takes `country` = `all` /
+`US` / `CA` and **defaults to `US` if omitted** — which is why Ontario once
+returned an empty list and reported it as a fact about Ontario. There is no
+second data source to integrate. A searched place passes the geocoder's
+`country_code`; a GPS fix passes `all`, because coordinates do not say which
+country you are standing in and the Detroit–Windsor border makes that literal.
+
+### The station-lookup key — policy, and a gate on charging money
+
+`DEMO_KEY` is the unconfigured default and that is deliberate. Its limits are
+**30 requests per IP address per hour, 50 per day** — *per IP*, not a pool shared
+across all users, which is the opposite of how shared demo keys usually fail.
+Live search is one lookup per deliberate button press, so almost nobody reaches
+the limit and almost nobody needs a key.
+
+Embedding a *registered* key would be the actual mistake: one global 1,000/hour
+quota, readable in the source of a single-file client app, revocable if anyone
+abuses it. One quota, one point of failure. **Never ship a registered key.**
+
+The platform documents `DEMO_KEY` as:
+
+> *"This API key can be used for initially exploring APIs prior to signing up,
+> but it has much lower rate limits, so you're encouraged to signup for your own
+> API key if you plan to use the API."*
+
+Not a prohibition — no wording anywhere forbids production or distributed use —
+but it is scoped to exploring *prior to signing up*. So the app asks for a key
+**after the first successful search**, when the user has demonstrably stopped
+exploring and started using it. Asking only after a `429` would mean asking only
+when the app has just failed them, and hiding the ask entirely would engineer the
+outcome where nobody ever signs up.
+
+> ### RELEASE GATE — if this app ever charges money
+>
+> **Live search must require the user's own key.** "Exploring prior to signing
+> up" reads differently in a paid product than a free one, and a commercial app
+> defaulting to a demo key is a materially weaker position than a hobby one —
+> regardless of whether any rule was broken. This is a gate on **monetisation**,
+> not a change to make now. It blocks the first paid release, alongside the
+> trademark review in §10.
 
 Count **vendors, not calls**, when applying the governing test. Destination search
 needed place→coordinates because the station API takes coordinates only — checked,
@@ -259,6 +300,9 @@ Start both developer enrolments early. Verification runs in the background and
 Apple's is the slow one.
 
 ### Monetisation
+
+**Before the first paid release:** live search must require the user's own
+station-lookup key — see the release gate in §6. Free-tier today, blocking then.
 
 Free tier: one vehicle, solver, milestones, temperature.
 Paid unlock, **$14.99 one-time, not a subscription**: unlimited garage, saved

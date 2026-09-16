@@ -15,7 +15,7 @@
 
 | | |
 |---|---|
-| **Repo** | `github.com/DrDentalAI/dwell` |
+| **Repo** | `github.com/DrDentalAI/dwell` — currently at **v1.12.2**; v1.13.0 and v1.14.0 both pending upload |
 | **Deployed / live on phone** | v1.11.2 |
 | **Built this session, ready to test** | **v1.12.0** |
 | Build size | 366,922 bytes (358.3 KB), self-contained |
@@ -214,6 +214,42 @@ already supplies the temperature, and its geocoder needs no key. Four network
 calls now, but still **three vendors**. The governing test should count vendors,
 not calls; the brief now says so.
 
+### Live search: Canada, and the API-key policy (v1.14.0)
+
+| # | change | verification |
+|---|---|---|
+| 1 | **`country` parameter now sent.** It defaults to `US` when omitted, so Ontario returned an empty list and reported it as a fact about Ontario | destination `Windsor, Ontario` → `country=CA`; `Rochester Hills` → `country=US`; GPS → `country=all`. Asserted on the outgoing URL |
+| 2 | **Key field off the main view**, into a `<details>` disclosure in the Garage | asserted closed and the field without a layout box |
+| 3 | **Ask after the first *successful* search**, not only after a 429 | nudge present alongside results, with no failure text |
+| 4 | **Paste anything.** Whole email line or a URL with `api_key=` → the 40-character key is extracted | extracts from both; returns `null` rather than guessing when no key is present |
+| 5 | **Verified on entry with one real call** | 403 → reported, **not stored**; 200 → stored and confirmed |
+| 6 | **429 carries the remedy in place** instead of pointing at a tab | — |
+
+**Why `DEMO_KEY` stays the default.** Its limits are **30/hour and 50/day per IP
+address** — per IP, not a pool shared across users, which is the opposite of how
+shared demo keys normally fail. One lookup per button press means almost nobody
+reaches it. Embedding a *registered* key would have been the real error: one
+global 1,000/hour quota, readable in a single-file client app, revocable.
+
+**Why the ask moved to success rather than failure.** The platform documents
+`DEMO_KEY` as *"for initially exploring APIs prior to signing up ... you're
+encouraged to signup for your own API key if you plan to use the API."* Not a
+prohibition, but scoped. A user who has just searched successfully has stopped
+exploring and started using it — that is the honest moment. Asking only on a 429
+means asking only when the app has just failed them.
+
+**Recorded as a release gate, not a change:** see brief §6 — *if this app ever
+charges money, live search must require the user's own key.* "Exploring prior to
+signing up" reads differently in a paid product, and a commercial app defaulting
+to a demo key is a weaker position than a hobby one. Blocks the first paid
+release, alongside the trademark review.
+
+**A test that lied, caught before it shipped.** The disclosure test asserted
+`offsetParent !== null` and failed against correct code: a closed `<details>`
+hides children with `content-visibility`, not `display:none`, so `offsetParent`
+stays set. Corrected to `checkVisibility()`. *The assertion was wrong, not the
+app* — third time this session that the measuring instrument was the defect.
+
 ### Discount integration (the whole of Task 2)
 
 | # | change | verification |
@@ -391,7 +427,7 @@ diagnostic message. Verification cost two web searches.
 
 | # | item | state |
 |---|---|---|
-| 1 | Test **v1.13.0** on the phone | **ready** — v1.12.0/v1.12.1 dead on open, v1.12.2 has an unusable ZIP field |
+| 1 | Test **v1.14.0** on the phone | **ready** — v1.12.0/v1.12.1 dead on open, v1.12.2 has an unusable ZIP field. v1.13.0 was never uploaded; v1.14.0 contains it |
 | 1b | Eligibility profile UI — design agreed in chat, **not built** | one open question: dismissal global vs per-network |
 | 2 | Deploy the rewritten `/discounts` landing page | ready, not deployed |
 | 3 | Eligibility profile UI — memberships, gig platform+tier, cards | **needed**; the engine reads these, nothing sets them yet |
