@@ -392,6 +392,21 @@ Static tables pass. Scrapers fail. Apply this to anything proposed.
   verified, and confidence. State it visibly in the UI, not in a footer.
 - **Physical observation beats published specs.** Where the owner's direct
   observation contradicts documentation, the observation wins.
+- **A test that exercises one path through a function is not a test of that
+  function.** Three instances now, each one a test that reported success while
+  the thing it named was broken: a smoke test that proved the app *opened* while
+  a field discarded every keystroke; a docs check defeated by a line wrap; and
+  the canonical receipt test, which reproduced $28.76 for the entire life of a
+  30% double-discount bug because it only ever ran the pricing-table route and
+  never the user-saved-rate route a member actually uses. **Enumerate the routes
+  into a function and cover each one, or state plainly which are uncovered.** A
+  single canonical example is a demonstration, not coverage.
+- **Rates carry provenance, exactly as curves do.** Who observed it, when, and
+  **which membership plan was active**. `observedUnderPlan: null` is a deliberate
+  "no plan, this is the rack rate"; the field being absent means unknown, and
+  unknown must never be discounted. A price read off a charger by a member IS
+  the member price, and nothing downstream can tell that from a rack rate unless
+  it is recorded at the point of entry.
 - **One session is data, not a calibration.** Record a disagreement between model
   and measurement in `observations/`. Do not refit the model to a single session
   — that trades one wrong curve for a differently wrong curve still carrying a

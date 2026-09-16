@@ -15,7 +15,7 @@
 
 | | |
 |---|---|
-| **Repo** | `github.com/DrDentalAI/dwell` — currently at **v1.12.2**; v1.13.0 and v1.14.0 both pending upload |
+| **Repo** | `github.com/DrDentalAI/dwell` — at **v1.14.0**. Also contains a stray `index.html.html`, a second copy of the app; delete via the web UI |
 | **Deployed / live on phone** | v1.11.2 |
 | **Built this session, ready to test** | **v1.12.0** |
 | Build size | 366,922 bytes (358.3 KB), self-contained |
@@ -213,6 +213,66 @@ free-text location parameter — so destination search needed a geocoder. Open-M
 already supplies the temperature, and its geocoder needs no key. Four network
 calls now, but still **three vendors**. The governing test should count vendors,
 not calls; the brief now says so.
+
+## 2c. INCIDENT — a member's own price, discounted a second time
+
+Rate cards carried **no plan tag**: `perKWh, perMinute, perHour, sessionFee,
+idle, tou, taxIncluded, currency, confidence, lastVerified, note` — nothing
+recording who the observer was when they read the number.
+
+A member reads the price off the charger. That price **is** the member price.
+It gets stored as a plain `perKWh`, and `sessionCost()` then calls
+`planRate(rate, plan)`, which discounts it again:
+
+| | |
+|---|---|
+| Read off the charger as a PlusMax member | **$0.3100/kWh** |
+| Stored as `perKWh` | $0.3100 |
+| After `planRate()` with PlusMax selected | **$0.2170** |
+| Session cost, settled receipt | **$28.76** |
+| Session cost, double-discounted | **$20.13** |
+
+−30%, twice, always downward, and $20.13 is a believable number for that
+session. Blast radius: any rate entered while a discounting plan is selected —
+the *normal* path for a member, because the charger shows the member price.
+
+### Why the canonical test missed it — the finding that matters most
+
+**The receipt test reproduced $28.76 for the entire life of this bug.** It runs
+the pricing-table route. The user-saved-rate route — the one a member actually
+uses — was never touched by any test.
+
+> **A test that exercises one path through a function is not a test of that
+> function.** Third instance: a smoke test that proved the app *opened* while a
+> field discarded every keystroke; a docs check defeated by a line wrap; and now
+> a canonical receipt reproducing perfectly down one of two routes to a cost.
+> **Enumerate the routes and cover each, or state which are uncovered.** A
+> single canonical example is a demonstration, not coverage.
+
+### Fixed in v1.15.0 — three gates and a filter
+
+| # | change | verification |
+|---|---|---|
+| 1 | **Arithmetic gate.** A discount applies only when the rate is *positively known* to be a rack rate (`observedUnderPlan === null`). Same plan, different plan, or field absent → no further discount, with the reason shown | 4/4 provenance states correct; restoring the bug fails the build naming `perKWh 0.217` |
+| 2 | **Data gate.** `blankRate()` must record `observedUnderPlan`, `observedBy`, `observedOn`. `null` is a valid deliberate answer; **absent fails the build** | removing the field fails with the reason |
+| 3 | **Receipt gate — both routes.** $28.76 must reproduce via the pricing table **and** via a user-saved rate card tagged `observedUnderPlan: 'plusmax'` | with the bug restored and gate 2 removed, gate 3 alone fails: *"got $20.13, expected $28.76"* |
+| 4 | **Provenance displayed**, not a bare number — *"reported 12 Aug, EVgo PlusMax · 35 days ago"*, with a stale warning past 90 days and an explicit notice on rates saved before tagging existed | — |
+| 5 | **Level filter wired (item 2).** `ev_charging_level` was the literal `dc_fast`; the AC/DC toggle was decorative | DC → `dc_fast`, AC → `2`, asserted on the outgoing URL |
+| 6 | **Empty live results name the level searched** and point at the toggle | — |
+
+**Legacy rates need no migration.** Absence of `observedUnderPlan` already means
+unknown, and unknown blocks the discount — the safe direction by default. The
+UI offers a re-save to clear it.
+
+**Failing direction, deliberately.** A blocked discount costs the user a
+discount they may be owed. The alternative told them a session was 30% cheaper
+than it is. Only one of those is recoverable standing at the charger.
+
+**Item 2's rate half was a different defect.** Live results render name, city,
+network, kW and distance — **no cost field exists**, so a rate change could not
+alter them. That is item 7's "estimated cost on every result", still unbuilt.
+
+---
 
 ### Live search: Canada, and the API-key policy (v1.14.0)
 
@@ -427,7 +487,7 @@ diagnostic message. Verification cost two web searches.
 
 | # | item | state |
 |---|---|---|
-| 1 | Test **v1.14.0** on the phone | **ready** — v1.12.0/v1.12.1 dead on open, v1.12.2 has an unusable ZIP field. v1.13.0 was never uploaded; v1.14.0 contains it |
+| 1 | Test **v1.15.0** on the phone | **ready** — v1.12.0/v1.12.1 dead on open, v1.12.2 has an unusable ZIP field. v1.13.0 was never uploaded; v1.14.0 contains it |
 | 1b | Eligibility profile UI — design agreed in chat, **not built** | one open question: dismissal global vs per-network |
 | 2 | Deploy the rewritten `/discounts` landing page | ready, not deployed |
 | 3 | Eligibility profile UI — memberships, gig platform+tier, cards | **needed**; the engine reads these, nothing sets them yet |
@@ -493,6 +553,8 @@ claimed by anyone. **This is the single highest-value unfinished piece.**
   test passed against the broken build.
 - Proving the app starts and calling it tested. See §2b — v1.12.2 opened
   perfectly with an unusable ZIP field.
+- Covering one path through a function and calling it covered. See §2c — the
+  canonical receipt reproduced $28.76 throughout a 30% double-discount bug.
 - Settling a factual question by re-observing instead of checking a primary
   source. See §4a — the first report was right, the confident retraction was
   wrong, and only DOE's own announcement separated them.
