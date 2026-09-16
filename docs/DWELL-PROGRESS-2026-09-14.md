@@ -134,7 +134,85 @@ not evidence; it is a second bug wearing the costume of a result.**
 
 ---
 
+## 2b. INCIDENT — the ZIP field discarded every character but the first
+
+`oninput="UI.setPlace(this.value)"` called `renderPricing()`, which rewrites
+`innerHTML` on the container holding that very input. The browser destroys the
+focused node on each keystroke, so the field kept `"4"` of `"48307"` and lost
+focus. Reproduced headlessly, character by character:
+
+```
+typed "4"      -> field value "4"      focused=false
+typed "48"     -> field value "4"      focused=false
+typed "48307"  -> field value "4"      focused=false
+```
+
+**Fixed at the cause, not debounced.** Debouncing only delays the destruction,
+and restoring focus afterwards fights the browser. The rule:
+
+> **Never re-render the container holding the input being typed into.** Patch the
+> element that actually depends on the value.
+
+`placeHintHTML()` is now the single builder for that one line, called by both the
+full render and the keystroke handler, so the two cannot drift.
+
+### A second instance, not reported, worse than the one that was
+
+`finderSearch()` had the same re-render — and hid it with
+`el.focus(); el.setSelectionRange(v.length, v.length)`. That is the workaround
+this fix rejects, already shipped. It concealed the focus loss and introduced a
+subtler defect: **the caret jumped to the end on every keystroke**, so editing
+the middle of a query was impossible. Measured: inserting `X` at position 0 of
+`Rochester` left the caret at 10 instead of 1. Now patches `#finder-results`
+only, and the caret stays where the user put it.
+
+### And one reported instance that was not real
+
+The station-lookup key field was reported as sharing the fault. It does not —
+`setNrelKey()` never re-renders, and typing `ABCDE` yields `ABCDE` with focus
+held. Tested before changing it, and left alone. **Same `oninput=` shape, no
+shared defect; the pattern is not the bug, the re-render is.**
+
+### Why nothing caught it
+
+The v1.12.2 smoke test proved the app *opened*. It never typed into anything.
+
+> **"It starts" and "it works" are different claims.** A startup test retires one
+> class of bug and silently licenses the next.
+
+`test/smoke.js` now has a second phase: **7 interaction scenarios** alongside the
+9 startup ones. All 7 fail against the pre-fix build and pass against this one —
+they have been seen to fail, per §2a's rule.
+
+One further fix to the test itself: against a build missing an element, Playwright's
+default 30-second wait turned a failing test into a **hanging** one. Capped at 4s.
+A suite that hangs is a suite that gets skipped before a release.
+
+---
+
 ## 3. What changed this session — v1.12.0
+
+### Plan tab — real-use fixes (v1.13.0)
+
+| # | change | verification |
+|---|---|---|
+| 1 | **ZIP field fixed at the cause.** No container re-render from `oninput`; `placeHintHTML()` patches one element | types `48307` in full, keeps focus |
+| 2 | **Finder caret fixed.** Focus/`setSelectionRange` hack removed, results patched instead | insert at position 0 → caret stays at 1, was 10 |
+| 3 | **Three location controls relabelled.** ZIP now reads *"sets the price, not the chargers"*; the finder is split into titled **Built-in list** and **Search live** sections | the three controls no longer read as one feature |
+| 4 | **Honest empty state.** A query the 5-site list cannot match now names the list size, the area, the query, and the control that can answer | was: blank, which read as broken |
+| 5 | **Destination search added.** Place → coordinates via Open-Meteo geocoding → existing station lookup | `Rochester` → asks Michigan or New York → stations, labelled *Near Rochester, Michigan* |
+| 6 | **One station lookup, two ways in.** GPS and destination both call `stationsAt()` | one error path, one degradation path, one result list |
+| 7 | **7 interaction tests** added to `test/smoke.js` | 7/7 fail on the old build, 7/7 pass on this one |
+
+**Ambiguity is asked about, never guessed.** Rochester, Michigan and Rochester,
+New York are 600 miles apart; returning the first hit would give the wrong city's
+chargers and look exactly like a correct answer.
+
+**No new vendor.** The station API takes coordinates only — verified, it has no
+free-text location parameter — so destination search needed a geocoder. Open-Meteo
+already supplies the temperature, and its geocoder needs no key. Four network
+calls now, but still **three vendors**. The governing test should count vendors,
+not calls; the brief now says so.
 
 ### Discount integration (the whole of Task 2)
 
@@ -313,7 +391,8 @@ diagnostic message. Verification cost two web searches.
 
 | # | item | state |
 |---|---|---|
-| 1 | Test **v1.12.2** on the phone | **ready** — v1.12.0/v1.12.1 are dead on open, skip them |
+| 1 | Test **v1.13.0** on the phone | **ready** — v1.12.0/v1.12.1 dead on open, v1.12.2 has an unusable ZIP field |
+| 1b | Eligibility profile UI — design agreed in chat, **not built** | one open question: dismissal global vs per-network |
 | 2 | Deploy the rewritten `/discounts` landing page | ready, not deployed |
 | 3 | Eligibility profile UI — memberships, gig platform+tier, cards | **needed**; the engine reads these, nothing sets them yet |
 | 4 | Google Play via TWA | pending |
@@ -376,6 +455,8 @@ claimed by anyone. **This is the single highest-value unfinished piece.**
   test and was dead on open.
 - Trusting a test that has never been seen to fail. See §2a — the first smoke
   test passed against the broken build.
+- Proving the app starts and calling it tested. See §2b — v1.12.2 opened
+  perfectly with an unusable ZIP field.
 - Settling a factual question by re-observing instead of checking a primary
   source. See §4a — the first report was right, the confident retraction was
   wrong, and only DOE's own announcement separated them.

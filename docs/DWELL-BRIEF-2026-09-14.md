@@ -200,15 +200,21 @@ auto-applied).
 - No payments or charging-network integration.
 - **No live telemetry from the car.** SOC is entered by hand.
 
-**Three optional network calls, not two.** Everything the app *calculates* works
-offline; three features will reach the network if the user asks them to, and each
-falls back to manual entry or a built-in list when it can't:
+**Four optional network calls, across three vendors.** Everything the app
+*calculates* works offline; four features will reach the network if the user asks
+them to, and each falls back to manual entry or a built-in list when it can't:
 
 | call | feature | note |
 |---|---|---|
 | NHTSA vPIC | VIN decode | free, no key |
-| Open-Meteo | current temperature | free, no key |
+| Open-Meteo forecast | current temperature | free, no key |
+| Open-Meteo geocoding | destination → coordinates for the station finder | free, no key, **same vendor as the temperature call — deliberately not a new dependency** |
 | `developer.nlr.gov` | nearby DC station finder | ships a **shared `DEMO_KEY`** that rate-limits under load; a personal key is free from `developer.nlr.gov/signup` and lifts the limit |
+
+Count **vendors, not calls**, when applying the governing test. Destination search
+needed place→coordinates because the station API takes coordinates only — checked,
+it has no free-text location parameter. Reusing the geocoder from a vendor already
+in the app added a capability without adding anything new to verify each quarter.
 
 **NLR, formerly NREL.** The Department of Energy renamed the National Renewable
 Energy Laboratory to the **National Laboratory of the Rockies** and moved its
