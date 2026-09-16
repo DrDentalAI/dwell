@@ -3957,8 +3957,8 @@ const $ = id => document.getElementById(id);
 const h = s => String(s == null ? '' : s).replace(/[&<>"']/g, c =>
   ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 const KEY = 'evdwell.v1';
-const VERSION = '1.12.2';
-const BUILT = '14 Sep 2026, 21:36 UTC';
+const VERSION = '1.13.0';
+const BUILT = '16 Sep 2026, 03:00 UTC';
 
 /* ------------------------------------------------------------------ STATE */
 const DEFAULT_SESSION = () => ({
@@ -4600,6 +4600,27 @@ discountHTML(dres) {
     ${exRows}</div>`;
 },
 
+/* The ZIP hint is built here and NOWHERE else, because two callers need it:
+   the full panel render, and the keystroke handler that patches this one
+   element in place. A forked copy would drift the moment either changed. */
+placeHintHTML() {
+  const pl = S.place;
+  const net = this.currentNetwork();
+  const regionalIds = P.networksWithRegionalPricing().map(n => n.id);
+  if (!S.placeRaw)
+    return 'Sets which <b>price</b> is used where a network charges differently by ' +
+           'state or province. It does not search for chargers \u2014 use ' +
+           '<b>Find a charger</b> below for that.';
+  if (!pl)
+    return 'Not a ZIP or postal code I recognise \u2014 nothing has been applied.';
+  return `Reading this as <b>${h(pl.state || pl.province)}</b>, ` +
+    `${pl.country === 'US' ? 'USA' : 'Canada'}. ` +
+    (net && regionalIds.includes(net.id)
+      ? 'This network does price by jurisdiction, so it is being used.'
+      : net ? h(net.name) + ' does not price by state, so this changes nothing for it.'
+            : 'Pick a network below to use it.');
+},
+
 renderPricing() {
   const box = $('pricing-box'); if (!box) return;
   const pr = S.session.pricing;
@@ -4629,17 +4650,10 @@ renderPricing() {
      this says plainly whether it changed anything for the one you picked. */
   const pl = S.place;
   const regionalIds = P.networksWithRegionalPricing().map(n => n.id);
-  inner += `<label class="fl">ZIP / postal code (optional)</label>
+  inner += `<label class="fl">ZIP / postal code &mdash; sets the price, not the chargers</label>
     <input type="text" inputmode="text" placeholder="48307" value="${h(S.placeRaw || '')}"
            oninput="UI.setPlace(this.value)">
-    <p class="hint">${
-      !S.placeRaw ? 'Only a few networks price differently by state or province. This picks the right one when they do.'
-      : pl ? `Reading this as <b>${h(pl.state || pl.province)}</b>, ${pl.country === 'US' ? 'USA' : 'Canada'}. ` +
-             (net && regionalIds.includes(net.id)
-               ? 'This network does price by jurisdiction, so it is being used.'
-               : net ? h(net.name) + ' does not price by state, so this changes nothing for it.'
-                     : 'Pick a network below to use it.')
-      : 'Not a ZIP or postal code I recognise — nothing has been applied.'}</p>`;
+    <p class="hint" id="place-hint">${this.placeHintHTML()}</p>`;
 
   inner += `<label class="fl" style="margin-top:11px">Charging network — for cost</label>
     <select onchange="UI.setNetwork(this.value)">
@@ -5267,51 +5281,88 @@ renderFinder() {
       &#128269; Find a charger</button>`;
     return;
   }
-  const q = S.finder.q || '';
-  const sites = L.searchSites(q);
-  const live = S.finder.live || [];
-
-  const siteRow = st => {
-    const best = L.bestStall(st);
-    const net = P.findNetwork(st.network);
-    return `<button class="row-btn" onclick="UI.pickSite('${st.id}')">
-      <div style="flex:1;min-width:0">
-        <div class="nm">${h(st.name)}</div>
-        <div class="sub">${h(st.city)}, ${h(st.state)} · ${net ? h(net.name) : ''} ·
-          ${st.stalls.map(t => `${t.count}\u00d7${t.kW} kW`).join(' + ')}</div>
-      </div><div class="badge solved">${best.kW} kW</div></button>`;
-  };
-
-  const liveRow = (r, i) => `<button class="row-btn" onclick="UI.pickLive(${i})">
-      <div style="flex:1;min-width:0">
-        <div class="nm">${h(r.name)}</div>
-        <div class="sub">${h(r.city || '')} · ${h(r.network || 'Unknown operator')}
-          ${r.kW ? ` · ${r.kW} kW` : ''} · ${r.distance != null ? r.distance.toFixed(1) + ' mi' : ''}</div>
-      </div>${r.kW ? `<div class="badge">${r.kW} kW</div>` : ''}</button>`;
+  const pf = S.finder.place || (S.finder.place = { q:'', results:[], busy:false, error:null, label:null });
 
   box.innerHTML = `
     <div class="divider"></div>
     <div class="card-h" style="margin-bottom:8px"><h3 style="font-size:14px;margin:0">Find a charger</h3>
       <button class="act" onclick="UI.toggleFinder()">Close</button></div>
 
-    <input type="search" id="finder-q" placeholder="Meijer, Rochester, EVgo\u2026" value="${h(q)}"
-           oninput="UI.finderSearch(this.value)">
-
-    <div class="rows" style="margin-top:10px">
-      ${sites.length ? sites.map(siteRow).join('')
-        : `<p class="hint">Nothing in the built-in list matches. Try the live lookup below.</p>`}
-    </div>
-    <p class="hint">Built-in list \u2014 ${L.KNOWN_SITES.length} sites checked stall-by-stall against the
-      operator's own pages. Works with no signal. Metro Detroit for now.</p>
+    <!-- SECTION 1: the short hand-checked list. Filter only. -->
+    <label class="fl">Built-in list &mdash; ${L.KNOWN_SITES.length} sites, metro Detroit, works with no signal</label>
+    <input type="search" id="finder-q" placeholder="Meijer, Rochester, EVgo\u2026"
+           value="${h(S.finder.q || '')}" oninput="UI.finderSearch(this.value)">
+    <div id="finder-results">${this.builtInResultsHTML()}</div>
 
     <div class="divider"></div>
-    <button class="btn sm" style="width:100%" onclick="UI.findNearby()"
-      ${S.finder.busy ? 'disabled' : ''}>${S.finder.busy ? 'Searching\u2026' : '\u{1F4CD} Search near me (needs signal)'}</button>
+
+    <!-- SECTION 2: live lookup. Two ways in, one result list. -->
+    <label class="fl">Search live &mdash; anywhere in the US</label>
+    <input type="search" id="finder-place" placeholder="Rochester Hills MI, or 48307\u2026"
+           value="${h(pf.q || '')}" oninput="UI.placeQuery(this.value)"
+           onkeydown="if(event.key==='Enter'){event.preventDefault();UI.findNearPlace();}">
+    <div class="row2" style="margin-top:8px;display:flex;gap:8px">
+      <button class="btn sm" style="flex:1" onclick="UI.findNearPlace()"
+        ${pf.busy || S.finder.busy ? 'disabled' : ''}>${pf.busy ? 'Looking up\u2026' : 'Search this place'}</button>
+      <button class="btn sm ghost" style="flex:1" onclick="UI.findNearby()"
+        ${S.finder.busy || pf.busy ? 'disabled' : ''}>${S.finder.busy ? 'Searching\u2026' : '\u{1F4CD} Near me'}</button>
+    </div>
+    <p class="hint">Where you are, or where you are going. Needs a connection either way.</p>
+
+    ${pf.error ? `<div class="note bad" style="margin-top:10px">${h(pf.error)}</div>` : ''}
+    ${pf.results && pf.results.length > 1 ? `<div class="rows" style="margin-top:10px">
+        <p class="hint" style="margin:0 0 6px">More than one place matches. Which one?</p>
+        ${pf.results.map((r, i) => `<button class="row-btn" onclick="UI.pickPlace(${i})">
+          <div style="flex:1;min-width:0"><div class="nm">${h(r.name)}</div>
+          <div class="sub">${h([r.admin1, r.country_code].filter(Boolean).join(', '))}</div></div></button>`).join('')}
+      </div>` : ''}
+
     ${S.finder.error ? `<div class="note bad" style="margin-top:10px">${h(S.finder.error)}</div>` : ''}
-    ${live.length ? `<div class="rows" style="margin-top:10px">${live.map(liveRow).join('')}</div>
-      <p class="hint">Live results from the US Department of Energy's station database.
-        It publishes hardware, not prices \u2014 no free source publishes live per-station rates,
-        so set the price yourself once and it sticks.</p>` : ''}`;
+    ${this.liveResultsHTML()}`;
+},
+
+/* Built separately so a keystroke can patch the list without touching the
+   input that produced it. Same rule as the ZIP field. */
+builtInResultsHTML() {
+  const q = S.finder.q || '';
+  const sites = L.searchSites(q);
+  const siteRow = st => {
+    const best = L.bestStall(st);
+    const net = P.findNetwork(st.network);
+    return `<button class="row-btn" onclick="UI.pickSite('${st.id}')">
+      <div style="flex:1;min-width:0">
+        <div class="nm">${h(st.name)}</div>
+        <div class="sub">${h(st.city)}, ${h(st.state)} \u00b7 ${net ? h(net.name) : ''} \u00b7
+          ${st.stalls.map(t => `${t.count}\u00d7${t.kW} kW`).join(' + ')}</div>
+      </div><div class="badge solved">${best.kW} kW</div></button>`;
+  };
+  if (sites.length)
+    return `<div class="rows" style="margin-top:10px">${sites.map(siteRow).join('')}</div>`;
+
+  /* EMPTY STATE. Showing nothing implied the search was broken. It is not --
+     the list is five sites in one metro area, and a query it cannot match is
+     the normal case, not a failure. Say the size of the list at the moment it
+     comes up empty, and point at the control that CAN answer. */
+  return `<div class="note warn" style="margin-top:10px">
+    <b>No match in the built-in list.</b> That list is only
+    <b>${L.KNOWN_SITES.length} sites in metro Detroit</b>, each checked stall-by-stall
+    against the operator's own pages${q ? ` \u2014 so &ldquo;${h(q)}&rdquo; almost certainly is not in it` : ''}.
+    <br><br>To find chargers anywhere else, use <b>Search live</b> below.</div>`;
+},
+
+liveResultsHTML() {
+  const live = S.finder.live || [];
+  if (!live.length) return '';
+  const row = (r, i) => `<button class="row-btn" onclick="UI.pickLive(${i})">
+      <div style="flex:1;min-width:0">
+        <div class="nm">${h(r.name)}</div>
+        <div class="sub">${h(r.city || '')} \u00b7 ${h(r.network || 'Unknown operator')}
+          ${r.kW ? ` \u00b7 ${r.kW} kW` : ''} \u00b7 ${r.distance != null ? r.distance.toFixed(1) + ' mi' : ''}</div>
+      </div>${r.kW ? `<div class="badge">${r.kW} kW</div>` : ''}</button>`;
+  return `<div class="rows" style="margin-top:10px">${live.map(row).join('')}</div>
+    <p class="hint">${S.finder.liveLabel ? `Near <b>${h(S.finder.liveLabel)}</b>. ` : ''}Live results from the
+      US Department of Energy's station database. It publishes hardware, not prices \u2014 no free
+      source publishes live per-station rates, so set the price yourself once and it sticks.</p>`;
 },
 
 toggleFinder() { S.finder.open = !S.finder.open; this.renderFinder(); },
@@ -5323,10 +5374,38 @@ setPlace(v) {
   const hit = P.regionFromPostal(v);
   S.place = hit;
   S.placeRaw = String(v || '');
-  save(); this.renderPricing(); this.renderOutput();
+  save();
+  /* DO NOT call renderPricing() here. It rewrites innerHTML on the container
+     that holds this very input, so the browser destroys the focused node on
+     every keystroke: you type "48307" and the field keeps "4".
+
+     Debouncing only delays the destruction; restoring focus afterwards fights
+     the browser and throws the caret to the end, which breaks editing in the
+     middle of a value. The fix is to not re-render the thing you are typing
+     into. Patch the one element that actually depends on the value.
+
+     renderOutput() is safe -- different container, does not contain the input. */
+  const hint = $('place-hint');
+  if (hint) hint.innerHTML = this.placeHintHTML();
+  this.renderOutput();
 },
 setNrelKey(v) { S.nrelKey = String(v || '').trim() || null; save(); },
-finderSearch(v) { S.finder.q = v; this.renderFinder(); const el = $('finder-q'); if (el) { el.focus(); el.setSelectionRange(v.length, v.length); } },
+/* Was: re-render the whole finder, then grab focus back and force the caret to
+   the end. That hid the focus loss and introduced a worse one -- the caret
+   jumped to the end on every keystroke, so editing the middle of a query was
+   impossible. Patch the results, never the input. */
+finderSearch(v) {
+  S.finder.q = v;
+  const el = $('finder-results');
+  if (el) el.innerHTML = this.builtInResultsHTML(); else this.renderFinder();
+},
+
+placeQuery(v) {
+  const pf = S.finder.place || (S.finder.place = { q:'', results:[], busy:false, error:null, label:null });
+  pf.q = v;
+  /* No render at all. Nothing on screen depends on this until Search is
+     pressed, and re-rendering would destroy the input being typed into. */
+},
 
 /* Applying a known site: take its fastest stall's hardware and its operator. */
 clearSite() { S.session.siteLabel = null; save(); this.renderAll(); },
@@ -5386,27 +5465,97 @@ async findNearby() {
   } catch (e) {
     return fail('Location was refused or timed out. The built-in list above still works.');
   }
+  return this.stationsAt(pos.coords.latitude, pos.coords.longitude, null);
+},
+
+/* ---- DESTINATION SEARCH -----------------------------------------------
+   The app is about a dwell you have PLANNED, so "where I am standing" is the
+   wrong question most of the time: you are at work, and the charger you care
+   about is at the hotel. GPS answered the wrong question and was the only way in.
+
+   The station database takes coordinates and nothing else -- checked, it has no
+   free-text location parameter -- so the missing piece is place -> coordinates.
+   That is Open-Meteo's geocoder: the SAME vendor already used for temperature,
+   no key, no account. Deliberately not a new dependency; the governing test
+   counts vendors, and this adds none.                                      */
+async findNearPlace() {
+  const pf = S.finder.place || (S.finder.place = { q:'', results:[], busy:false, error:null, label:null });
+  const raw = $('finder-place') ? $('finder-place').value : pf.q;
+  const q = String(raw || '').trim();
+  pf.q = q;
+  pf.error = null; pf.results = [];
+  if (!q) { pf.error = 'Type a city, address or ZIP first.'; return this.renderFinder(); }
+
+  pf.busy = true; S.finder.error = null; this.renderFinder();
+  const fail = msg => { pf.busy = false; pf.error = msg; this.renderFinder(); };
+
+  let data;
+  try {
+    const url = 'https://geocoding-api.open-meteo.com/v1/search' +
+      `?name=${encodeURIComponent(q)}&count=5&language=en&format=json`;
+    const r = await fetch(url);
+    if (!r.ok) return fail(`Place lookup failed (${r.status}). The built-in list above still works.`);
+    data = await r.json();
+  } catch (e) {
+    return fail('Could not reach the place lookup from this browser. The built-in list above still works.');
+  }
+
+  const hits = (data && data.results) || [];
+  /* Never guess. An empty result is reported as empty. */
+  if (!hits.length)
+    return fail(`Nothing found for \u201c${q}\u201d. Try adding a state \u2014 ` +
+                '&ldquo;Rochester, Michigan&rdquo; rather than &ldquo;Rochester&rdquo;.');
+
+  pf.busy = false;
+  if (hits.length > 1) {
+    /* Rochester, Michigan and Rochester, New York are 600 miles apart. Picking
+       the first and calling it the answer would quietly return the wrong city's
+       chargers, which looks exactly like a correct answer. Ask. */
+    pf.results = hits;
+    return this.renderFinder();
+  }
+  return this.pickPlaceObj(hits[0]);
+},
+
+pickPlace(i) {
+  const pf = S.finder.place || {};
+  const hit = (pf.results || [])[i];
+  if (!hit) return;
+  pf.results = [];
+  return this.pickPlaceObj(hit);
+},
+
+pickPlaceObj(hit) {
+  const pf = S.finder.place;
+  pf.label = [hit.name, hit.admin1, hit.country_code].filter(Boolean).join(', ');
+  pf.results = [];
+  return this.stationsAt(hit.latitude, hit.longitude, pf.label);
+},
+
+/* One station lookup, two ways in. Both the GPS button and the destination
+   search land here, so the result list, the error handling and the graceful
+   degradation are identical and there is only one of each to maintain. */
+async stationsAt(lat, lon, label) {
+  S.finder.busy = true; S.finder.error = null;
+  if (S.finder.place) S.finder.place.busy = false;
+  this.renderFinder();
+  const fail = msg => { S.finder.busy = false; S.finder.error = msg; this.renderFinder(); };
+
   const key = S.nrelKey || 'DEMO_KEY';
   /* HOST CHANGED 2026. DOE renamed NREL to the National Laboratory of the
-     Rockies; the developer network moved to developer.nlr.gov and DNS for
-     nrel.gov and every subdomain "ceased to resolve and will not redirect".
-     There is no fallback to try -- the old host is gone, not slow.
-
-     Only the HOST changed. Verified against the new docs rather than assumed:
-     path /api/alt-fuel-stations/v1/nearest.json, every parameter below, the
-     fuel_stations[] envelope and the ev_charging_units[].connectors{}.power_kw
-     shape this function reads are all unchanged, and existing API keys keep
-     working -- "only the domain in the URL needs to be updated". */
+     Rockies; DNS for nrel.gov and every subdomain ceased to resolve and does
+     not redirect. Only the host changed -- path, parameters, response shape and
+     existing keys are unaffected. */
   const url = `https://developer.nlr.gov/api/alt-fuel-stations/v1/nearest.json` +
     `?api_key=${encodeURIComponent(key)}&fuel_type=ELEC&ev_charging_level=dc_fast` +
-    `&latitude=${pos.coords.latitude}&longitude=${pos.coords.longitude}` +
+    `&latitude=${lat}&longitude=${lon}` +
     `&radius=25&limit=25&status=E&access=public`;
   try {
     const resp = await fetch(url);
     if (resp.status === 429) return fail('The shared demo key is used up for now. Add your own free key at the bottom of the Garage tab, or use the built-in list.');
     if (resp.status === 404 || resp.status === 410)
       return fail('The station database has moved and this build is pointing at the old address. ' +
-                  'The built-in list above still works. (Federal host change — see the note in Settings.)');
+                  'The built-in list above still works. (Federal host change \u2014 see the note in Settings.)');
     if (!resp.ok) return fail(`Station lookup failed (${resp.status}). The built-in list above still works.`);
     const data = await resp.json();
     S.finder.live = (data.fuel_stations || []).map(f => {
@@ -5418,12 +5567,15 @@ async findNearby() {
           if (pk && (!kW || pk > kW)) kW = pk;
         });
       });
-      return { name: f.station_name, city: f.city, network: f.ev_network,
-               networkId: this.nrelNetwork(f.ev_network), kW,
-               distance: f.distance, level: 'DC' };
+      return { name: f.station_name, city: f.city, network: this.nrelNetwork(f.ev_network),
+               kW, distance: f.distance, lat: f.latitude, lon: f.longitude };
     }).filter(r => r.name);
     S.finder.busy = false;
-    if (!S.finder.live.length) S.finder.error = 'No DC fast chargers found within 25 miles.';
+    S.finder.liveLabel = label;
+    if (!S.finder.live.length)
+      S.finder.error = label
+        ? `No DC fast chargers found within 25 miles of ${label}.`
+        : 'No DC fast chargers found within 25 miles.';
     this.renderFinder();
   } catch (e) {
     // A CORS rejection surfaces here as a bare TypeError with no status.
