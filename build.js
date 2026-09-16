@@ -13,7 +13,7 @@ const p = f => fs.readFileSync(__dirname + '/' + f, 'utf8').replace(/\n$/, '');
 
 /* Bump VERSION whenever something user-visible changes. The build stamp is
    generated here so the phone can prove which copy it is actually running. */
-const VERSION = '1.14.0';
+const VERSION = '1.15.0';
 const now = new Date();
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const pad = n => String(n).padStart(2, '0');
@@ -137,6 +137,89 @@ if (minted.length)
       'object does not define: ' + [...missing].join(', ') +
       '. This is the v1.12.1 startup crash — it kills the app on open, not in a test.');
   console.log(`  ui gate: ${defined.size} UI methods, every this.x() call resolves`);
+}
+
+/* ---- RATE PROVENANCE GATES ----------------------------------------------
+   Two gates and one reproduction, all guarding the same defect: a rate read off
+   a charger by a member, stored untagged, then discounted a second time. */
+
+/* GATE A -- DATA. Every user-entered rate must ANSWER the plan question.
+   `observedUnderPlan: null` is a valid, deliberate answer meaning "no plan was
+   active, this is the rack rate". ABSENT is not an answer, and absent is what
+   shipped. Force the template to declare it. */
+{
+  const src = p('src/app.js');
+  const m = src.match(/blankRate\(\)\s*\{[\s\S]*?\n\},/);
+  if (!m) throw new Error('build: could not find blankRate() in src/app.js');
+  ['observedUnderPlan', 'observedBy', 'observedOn'].forEach(f => {
+    if (!new RegExp('\\b' + f + '\\s*:').test(m[0]))
+      throw new Error('build: blankRate() does not record `' + f + '`. A user-entered ' +
+        'rate with no provenance cannot be told apart from a rack rate, which is how ' +
+        'a member price gets discounted twice.');
+  });
+}
+
+/* GATE B -- ARITHMETIC. The refusal to double-discount must actually hold.
+   Asserted against the four provenance states, not assumed from reading it. */
+{
+  const EVPricing = require('./ev-pricing.js');
+  const net = EVPricing.findNetwork('evgo');
+  const plan = (net.plans || []).find(x => x.id === 'evgo-plusmax');
+  if (!plan) throw new Error('build: evgo-plusmax plan missing; the gate cannot be checked');
+  const base = { perKWh: 0.31, perMinute: null, perHour: null, sessionFee: 0, idle: null,
+                 powerBands: null, afterSOC: null, tou: null, taxIncluded: false,
+                 taxPct: 6, currency: 'USD', confidence: 'user', lastVerified: '2026-09-16' };
+  const check = (label, extra, shouldDiscount) => {
+    const out = EVPricing.planRate(Object.assign({}, base, extra), plan);
+    const discounted = out.perKWh < 0.31 - 1e-9;
+    if (discounted !== shouldDiscount)
+      throw new Error(`build: double-discount gate broken — ${label}: perKWh ${out.perKWh}, ` +
+        `expected ${shouldDiscount ? 'a discount' : 'NO further discount'}`);
+  };
+  check('observed under the same plan', { observedUnderPlan: 'evgo-plusmax' }, false);
+  check('observed under a different plan', { observedUnderPlan: 'evgo-plus' }, false);
+  check('legacy rate, field absent', {}, false);
+  check('explicit rack rate', { observedUnderPlan: null }, true);
+}
+
+/* GATE C -- THE RECEIPT, THROUGH BOTH ROUTES TO A COST.
+   The canonical receipt test reproduced $28.76 for the entire life of the
+   double-discount bug, because it only ever ran the pricing-table route. The
+   user-saved-rate route -- the one an actual member uses -- was never touched.
+
+   ONE CANONICAL TEST COVERING ONE OF TWO PATHS IS NOT A TEST OF THE FUNCTION.
+   Both routes must land on the settled receipt or the build fails. */
+{
+  const EVPricing = require('./ev-pricing.js');
+  const kWh = 87.51612903225806, mins = 65;
+  const tl = []; for (let m = 0; m <= mins; m += 0.25) tl.push({ min: m, kW: kWh / (mins / 60) });
+  const sim = { deliveredKWh: kWh, timeline: tl, minutes: mins };
+  const net = EVPricing.findNetwork('evgo');
+  const plan = (net.plans || []).find(x => x.id === 'evgo-plusmax');
+  const opts = { plan, dwellMinutes: mins, network: net, startClockMinutes: 21 * 60 + 9 };
+
+  const route = (label, rate) => {
+    const c = EVPricing.sessionCost(sim, rate, opts);
+    const total = Math.round(c.total * 100) / 100;
+    if (total !== 28.76)
+      throw new Error(`build: the settled KATHLEEN receipt no longer reproduces via ${label} — ` +
+        `got $${total.toFixed(2)}, expected $28.76 (subtotal ${c.subTotal.toFixed(2)} + tax ${c.tax.toFixed(2)})`);
+    return total;
+  };
+
+  /* Route 1: the pricing table, discount applied by planRate. */
+  route('the pricing table', EVPricing.resolveRate(net, { state: 'MI' }));
+
+  /* Route 2: a rate the member read off the charger, already discounted, tagged
+     as such. The gate must refuse to discount it again, landing on the same
+     number from the other direction. */
+  route('a user-saved rate card', {
+    perKWh: 0.3100, perMinute: null, perHour: null, sessionFee: 0, idle: null,
+    powerBands: null, afterSOC: null, tou: null, taxIncluded: false, taxPct: 6,
+    currency: 'USD', confidence: 'user', lastVerified: '2026-08-12',
+    observedUnderPlan: 'evgo-plusmax', observedBy: 'you', observedOn: '2026-08-12'
+  });
+  console.log('  receipt gate: $28.76 via the pricing table AND via a user-saved rate');
 }
 
 /* ---- RATE AUTHORITY GATE ------------------------------------------------

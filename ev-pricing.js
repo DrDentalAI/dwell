@@ -742,8 +742,57 @@ function isStale(rate, today) {
    ========================================================================= */
 
 /* Effective per-kWh under a plan: explicit plan rate beats a percentage off. */
+/* ---- THE ARITHMETIC GATE ------------------------------------------------
+   A rate READ OFF A CHARGER by a member already has that member's discount in
+   it. Applying the plan discount again takes 30% off twice. Measured against
+   the settled KATHLEEN receipt: $0.3100/kWh observed as a PlusMax member became
+   $0.2170, and the session read $20.13 against a true $28.76. Always low, and
+   low by a believable margin, so nothing catches it by eye.
+
+   A discount may therefore only be applied when we POSITIVELY KNOW the rate is
+   a rack rate. `observedUnderPlan === null` is that positive knowledge -- a
+   deliberate "no plan was active, this is the public price". Anything else,
+   including the field being ABSENT (every rate saved before this build), is
+   unknown, and unknown means do not discount.
+
+   Failing this way costs the user a discount they may be owed. Failing the
+   other way tells them a session is 30% cheaper than it is. Only one of those
+   is recoverable at the charger.                                            */
+function discountEligibility(rate, plan) {
+  if (!plan) return { apply: false, reason: null };
+  if (!rate || rate.confidence !== 'user') return { apply: true, reason: null };
+
+  if (!('observedUnderPlan' in rate))
+    return { apply: false, code: 'untagged', reason:
+      'This saved rate was recorded before the app tracked which plan you were on, ' +
+      'so it is not known whether a member discount is already in it. Shown as entered, ' +
+      'with no further discount applied. Re-save it to clear this.' };
+
+  if (rate.observedUnderPlan === null) return { apply: true, reason: null };
+
+  if (rate.observedUnderPlan === plan.id)
+    return { apply: false, code: 'already-applied', reason:
+      'You entered this price while on ' + plan.name + ', so the member discount is ' +
+      'already in it. Applying it again would take it off twice.' };
+
+  return { apply: false, code: 'other-plan', reason:
+    'This price was recorded on a different plan (' + rate.observedUnderPlan + ') than the ' +
+    'one selected. There is no way to convert one to the other without knowing what that ' +
+    'station charged, so it is shown as entered.' };
+}
+
 function planRate(rate, plan) {
   if (!plan) return rate;
+  const gate = discountEligibility(rate, plan);
+  if (!gate.apply) {
+    const out = Object.assign({}, rate, { discountBlocked: gate.code || null,
+                                          discountNote: gate.reason || null });
+    /* Fee waivers are a property of HOLDING the plan, not of the rate's
+       provenance, so they still apply. */
+    if (plan.waivesSessionFee) out.sessionFee = 0;
+    if (plan.waivesIdleFee && out.idle) out.idle = null;
+    return out;
+  }
   const out = Object.assign({}, rate);
   if (plan.perKWh != null && rate.perKWh != null) out.perKWh = plan.perKWh;
   else if (plan.discountPct && rate.perKWh != null) out.perKWh = rate.perKWh * (1 - plan.discountPct / 100);
@@ -1114,6 +1163,7 @@ return {
   DATA_VERSION, STALE_DAYS, FX_DEFAULT, NETWORKS,
   findNetwork, networksFor, resolveRate, planRate,
   sessionCost, idleAnalysis, breakEven, bandedCost, chargeMinutesOf,
+  discountEligibility,
   touWindowAt, touCost, touAdvice, minutesUntilHour,
   regionFromPostal, networksWithRegionalPricing,
   convert, money, confidenceLabel, ageDays, isStale,
