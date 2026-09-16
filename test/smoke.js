@@ -573,10 +573,87 @@ const SCENARIOS = [
     return { ok: st.stored === KEY && st.status === 'ok', why: JSON.stringify(st) };
   });
 
+  console.log('');
+  await captureStationURL('AC session searches Level 2, not dc_fast', US_GEO, 'US', async page => {
+    await page.evaluate(() => { S.session.level = 'AC'; UI.renderAll(); if (!S.finder.open) UI.toggleFinder(); });
+    await page.waitForTimeout(150);
+    await page.fill('#finder-place', 'Rochester Hills');
+    await page.click('button:has-text("Search this place")');
+    await page.waitForTimeout(450);
+  });
+
+  /* captureStationURL asserts `country`; assert the level separately. */
+  const levelSent = async (label, sessionLevel, expect) => {
+    const ctx = await browser.newContext(); const page = await ctx.newPage();
+    const urls = []; page.setDefaultTimeout(4000);
+    await page.route('**/*', async route => {
+      const u = route.request().url();
+      if (u.includes('alt-fuel-stations')) { urls.push(u);
+        return route.fulfill({ status:200, contentType:'application/json', body:'{"fuel_stations":[]}' }); }
+      if (u.includes('geocoding-api'))
+        return route.fulfill({ status:200, contentType:'application/json', body: JSON.stringify(US_GEO) });
+      return u.startsWith('file://') ? route.continue() : route.abort();
+    });
+    await page.goto('file://' + FILE); await page.waitForTimeout(600);
+    await page.evaluate(l => { S.session.level = l; UI.renderAll(); if (!S.finder.open) UI.toggleFinder(); }, sessionLevel);
+    await page.waitForTimeout(150);
+    await page.fill('#finder-place', 'Rochester Hills');
+    await page.click('button:has-text("Search this place")');
+    await page.waitForTimeout(450);
+    const m = (urls[0] || '').match(/ev_charging_level=([^&]*)/);
+    const ok = !!m && m[1] === expect;
+    if (!ok) failures++;
+    console.log(`${ok ? '  PASS' : '  FAIL'}  ${label}${ok ? '' : '\n          sent ' + (m ? m[1] : 'nothing') + ', expected ' + expect}`);
+    await ctx.close();
+  };
+  await levelSent('DC session sends ev_charging_level=dc_fast', 'DC', 'dc_fast');
+  await levelSent('AC session sends ev_charging_level=2', 'AC', '2');
+
+  await interact('an untagged saved rate is not discounted, and says why', null, async page => {
+    const t = await page.evaluate(() => {
+      UI.setNetwork('evgo'); UI.setPlan('evgo-plusmax');
+      /* a rate saved by an older build: no observedUnderPlan at all */
+      S.session.pricing.userRate = { perKWh: 0.31, perMinute: null, perHour: null,
+        sessionFee: 0, idle: null, powerBands: null, afterSOC: null, tou: null,
+        taxIncluded: false, taxPct: 6, currency: 'USD', confidence: 'user',
+        lastVerified: '2026-08-12' };
+      UI.renderAll();
+      return document.body.innerText;
+    });
+    return { ok: /Member discount not applied/i.test(t) && /before the app tracked/i.test(t),
+             why: 'no explanation shown for the blocked discount' };
+  });
+
+  await interact('a rate tagged with the same plan is not discounted twice', null, async page => {
+    const r = await page.evaluate(() => {
+      const net = EVPricing.findNetwork('evgo');
+      const plan = net.plans.find(p => p.id === 'evgo-plusmax');
+      const rate = { perKWh: 0.31, confidence: 'user', observedUnderPlan: 'evgo-plusmax',
+                     currency: 'USD', taxPct: 6 };
+      return { out: EVPricing.planRate(rate, plan).perKWh,
+               rack: EVPricing.planRate(Object.assign({}, rate, { observedUnderPlan: null }), plan).perKWh };
+    });
+    return { ok: Math.abs(r.out - 0.31) < 1e-9 && r.rack < 0.31,
+             why: JSON.stringify(r) };
+  });
+
+  await interact('a new rate records the plan it was observed under', null, async page => {
+    const r = await page.evaluate(() => {
+      UI.setNetwork('evgo'); UI.setPlan('evgo-plusmax');
+      const b = UI.blankRate();
+      UI.setPlan(null);
+      const b2 = UI.blankRate();
+      return { onPlan: b.observedUnderPlan, offPlan: b2.observedUnderPlan,
+               hasBy: 'observedBy' in b, hasOn: 'observedOn' in b };
+    });
+    return { ok: r.onPlan === 'evgo-plusmax' && r.offPlan === null && r.hasBy && r.hasOn,
+             why: JSON.stringify(r) };
+  });
+
   await browser.close();
   if (failures) {
     console.log(`\nsmoke: ${failures} scenario(s) FAILED`);
     process.exit(1);
   }
-  console.log(`\nsmoke: all ${SCENARIOS.length} startup + 15 interaction scenarios passed`);
+  console.log(`\nsmoke: all ${SCENARIOS.length} startup + 20 interaction scenarios passed`);
 })();
