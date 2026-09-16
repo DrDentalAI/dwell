@@ -444,10 +444,139 @@ const SCENARIOS = [
              why: 'offline path did not degrade to the built-in list' };
   });
 
+  const CA_GEO = { results: [
+    { name:'Windsor', admin1:'Ontario', country_code:'CA', latitude:42.31, longitude:-83.04 } ] };
+  const US_GEO = { results: [
+    { name:'Rochester Hills', admin1:'Michigan', country_code:'US', latitude:42.68, longitude:-83.13 } ] };
+
+  /* Capture the outgoing station URL so parameters can be asserted, not assumed.
+     The `country` parameter defaults to US when omitted, which is why Ontario
+     used to return an empty list and report it as a fact about Ontario. */
+  const captureStationURL = async (label, geo, expectCountry, act) => {
+    const ctx = await browser.newContext();
+    const page = await ctx.newPage();
+    const urls = [];
+    const errors = [];
+    page.on('pageerror', e => errors.push('UNCAUGHT: ' + e.message));
+    page.setDefaultTimeout(4000);
+    await page.route('**/*', async route => {
+      const u = route.request().url();
+      if (u.includes('alt-fuel-stations')) {
+        urls.push(u);
+        return route.fulfill({ status:200, contentType:'application/json',
+          body: JSON.stringify(STATIONS) });
+      }
+      if (u.includes('geocoding-api'))
+        return route.fulfill({ status:200, contentType:'application/json', body: JSON.stringify(geo) });
+      return u.startsWith('file://') ? route.continue() : route.abort();
+    });
+    await page.goto('file://' + FILE);
+    await page.waitForTimeout(600);
+    let ok = false, why = '';
+    try {
+      await act(page);
+      const u = urls[0] || '';
+      const m = u.match(/[?&]country=([^&]*)/);
+      ok = !!m && m[1] === expectCountry && errors.length === 0;
+      why = m ? `country=${m[1]}, expected ${expectCountry}` : 'no country parameter sent at all';
+      if (errors.length) { ok = false; why = errors[0]; }
+    } catch (e) { ok = false; why = e.message; }
+    if (!ok) failures++;
+    console.log(`${ok ? '  PASS' : '  FAIL'}  ${label}${ok ? '' : '\n          ' + why}`);
+    await ctx.close();
+  };
+
+  console.log('');
+  await captureStationURL('Canadian destination sends country=CA', CA_GEO, 'CA', async page => {
+    await page.evaluate(() => UI.toggleFinder());
+    await page.waitForTimeout(150);
+    await page.fill('#finder-place', 'Windsor Ontario');
+    await page.click('button:has-text("Search this place")');
+    await page.waitForTimeout(500);
+  });
+
+  await captureStationURL('US destination sends country=US', US_GEO, 'US', async page => {
+    await page.evaluate(() => UI.toggleFinder());
+    await page.waitForTimeout(150);
+    await page.fill('#finder-place', 'Rochester Hills');
+    await page.click('button:has-text("Search this place")');
+    await page.waitForTimeout(500);
+  });
+
+  await captureStationURL('GPS path sends country=all (country unknown)', US_GEO, 'all', async page => {
+    await page.evaluate(() => { UI.toggleFinder(); UI.stationsAt(42.33, -83.05, null, 'all'); });
+    await page.waitForTimeout(500);
+  });
+
+  await interact('key field is not on the Garage main view', null, async page => {
+    await page.evaluate(() => UI.go('garage'));
+    await page.waitForTimeout(300);
+    const st = await page.evaluate(() => {
+      const d = [...document.querySelectorAll('details')]
+        .find(x => /Station-lookup key/i.test(x.innerText));
+      const inp = document.getElementById('nrel-key');
+      /* offsetParent is the WRONG test here: a closed <details> hides its
+         children with content-visibility, not display:none, so offsetParent
+         stays set and the element reads as visible when it is not. Ask whether
+         it actually has a layout box. */
+      const visible = !!inp && (typeof inp.checkVisibility === 'function'
+        ? inp.checkVisibility() : inp.getClientRects().length > 0);
+      return { inDisclosure: !!d, disclosureOpen: d ? d.open : null, fieldVisible: visible };
+    });
+    return { ok: st.inDisclosure && st.disclosureOpen === false && !st.fieldVisible,
+             why: JSON.stringify(st) };
+  });
+
+  await interact('a successful live search invites a key, without failing first',
+    [['geocoding-api', US_GEO], ['alt-fuel-stations', STATIONS]], async page => {
+    await page.evaluate(() => UI.toggleFinder());
+    await page.waitForTimeout(150);
+    await page.fill('#finder-place', 'Rochester Hills');
+    await page.click('button:has-text("Search this place")');
+    await page.waitForTimeout(500);
+    const t = await page.evaluate(() => document.getElementById('finder-box').innerText);
+    return { ok: /shared demo allowance/i.test(t) && /Meijer/.test(t) && !/used up/i.test(t),
+             why: 'nudge missing, or only appeared alongside a failure' };
+  });
+
+  await interact('pasting a whole line extracts the 40-character key',
+    [['geocoding-api', US_GEO], ['alt-fuel-stations', STATIONS]], async page => {
+    const KEY = 'a'.repeat(20) + 'B9'.repeat(10);   // 40 chars
+    const res = await page.evaluate(k => {
+      return { got: UI.extractKey('Your API key is ' + k + ' -- keep it private'),
+               fromUrl: UI.extractKey('https://x/api?api_key=' + k + '&z=1'),
+               none: UI.extractKey('no key in this line at all') };
+    }, KEY);
+    return { ok: res.got === KEY && res.fromUrl === KEY && res.none === null,
+             why: JSON.stringify(res) };
+  });
+
+  await interact('a rejected key is reported, not silently stored',
+    [['geocoding-api', US_GEO]], async page => {
+    const KEY = 'z'.repeat(40);
+    await page.route('**/alt-fuel-stations**', r => r.fulfill({ status:403, body:'{}' }));
+    await page.evaluate(async k => { await UI.setNrelKey(k); }, KEY);
+    await page.waitForTimeout(300);
+    const st = await page.evaluate(() => ({ stored: S.nrelKey, state: S.nrelKeyState }));
+    return { ok: st.stored === null && st.state && st.state.status === 'bad',
+             why: JSON.stringify(st) };
+  });
+
+  await interact('an accepted key is stored and confirmed',
+    [['geocoding-api', US_GEO]], async page => {
+    const KEY = 'q'.repeat(40);
+    await page.route('**/alt-fuel-stations**', r =>
+      r.fulfill({ status:200, contentType:'application/json', body:'{"fuel_stations":[]}' }));
+    await page.evaluate(async k => { await UI.setNrelKey(k); }, KEY);
+    await page.waitForTimeout(300);
+    const st = await page.evaluate(() => ({ stored: S.nrelKey, status: S.nrelKeyState.status }));
+    return { ok: st.stored === KEY && st.status === 'ok', why: JSON.stringify(st) };
+  });
+
   await browser.close();
   if (failures) {
     console.log(`\nsmoke: ${failures} scenario(s) FAILED`);
     process.exit(1);
   }
-  console.log(`\nsmoke: all ${SCENARIOS.length} startup + 7 interaction scenarios passed`);
+  console.log(`\nsmoke: all ${SCENARIOS.length} startup + 15 interaction scenarios passed`);
 })();
