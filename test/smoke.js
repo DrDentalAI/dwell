@@ -321,10 +321,133 @@ const SCENARIOS = [
     await ctx.close();
   }
 
+  /* ---- PHASE 2: INTERACTION -------------------------------------------
+     Startup tests prove the app opens. They do not prove a field can be typed
+     into. v1.12.2 opened perfectly and the ZIP field discarded every character
+     after the first, because its own oninput handler re-rendered the container
+     holding it. "It starts" and "it works" are different claims. */
+  const GEO2 = { results: [
+    { name:'Rochester', admin1:'Michigan', country_code:'US', latitude:42.68, longitude:-83.13 },
+    { name:'Rochester', admin1:'New York', country_code:'US', latitude:43.15, longitude:-77.61 } ] };
+  const STATIONS = { fuel_stations: [
+    { station_name:'Meijer - Rochester Hills', city:'Rochester Hills', ev_network:'eVgo Network',
+      distance:1.2, latitude:42.6, longitude:-83.1,
+      ev_charging_units:[{ connectors:{ CCS:{ power_kw:350, port_count:2 } } }] } ] };
+
+  const interact = async (label, routes, fn) => {
+    const ctx = await browser.newContext();
+    const page = await ctx.newPage();
+    const errors = [];
+    page.on('pageerror', e => errors.push('UNCAUGHT: ' + e.message));
+    await page.route('**/*', async route => {
+      const u = route.request().url();
+      for (const [frag, body] of (routes || [])) {
+        if (u.includes(frag)) return route.fulfill({ status:200, contentType:'application/json', body: JSON.stringify(body) });
+      }
+      return u.startsWith('file://') ? route.continue() : route.abort();
+    });
+    /* Fail fast. Against a build missing an element entirely, Playwright's
+       default 30s wait turns a failing test into a hanging one, and a suite
+       that hangs is a suite that gets skipped before a release. */
+    page.setDefaultTimeout(4000);
+    await page.goto('file://' + FILE);
+    await page.waitForTimeout(600);
+    let ok = false, why = '';
+    try { const r = await fn(page); ok = r.ok; why = r.why || ''; }
+    catch (e) { ok = false; why = e.message; }
+    if (errors.length) { ok = false; why = errors[0]; }
+    if (!ok) failures++;
+    console.log(`${ok ? '  PASS' : '  FAIL'}  ${label}${ok ? '' : '\n          ' + why}`);
+    await ctx.close();
+  };
+
+  const finderText = page => page.evaluate(() => document.getElementById('finder-box').innerText);
+
+  console.log('');
+  await interact('ZIP field keeps every character and keeps focus', null, async page => {
+    await page.evaluate(() => UI.setNetwork('evgo'));
+    await page.waitForTimeout(150);
+    await page.click('input[oninput*="setPlace"]');
+    await page.keyboard.type('48307', { delay: 40 });
+    const st = await page.evaluate(() => {
+      const el = document.querySelector('input[oninput*="setPlace"]');
+      return { v: el.value, f: document.activeElement === el };
+    });
+    return { ok: st.v === '48307' && st.f, why: `field held "${st.v}", focused=${st.f}` };
+  });
+
+  await interact('built-in filter allows mid-string editing', null, async page => {
+    await page.evaluate(() => UI.toggleFinder());
+    await page.waitForTimeout(150);
+    await page.click('#finder-q');
+    await page.keyboard.type('Rochester', { delay: 25 });
+    await page.evaluate(() => { const e = document.getElementById('finder-q'); e.focus(); e.setSelectionRange(0,0); });
+    await page.keyboard.type('X');
+    const st = await page.evaluate(() => {
+      const e = document.getElementById('finder-q'); return { v: e.value, c: e.selectionStart };
+    });
+    return { ok: st.v === 'XRochester' && st.c === 1, why: `got "${st.v}" caret ${st.c}` };
+  });
+
+  await interact('built-in empty state states the list size and points onward', null, async page => {
+    await page.evaluate(() => UI.toggleFinder());
+    await page.waitForTimeout(150);
+    await page.fill('#finder-q', 'Boston');
+    await page.waitForTimeout(150);
+    const t = await finderText(page);
+    return { ok: /metro Detroit/i.test(t) && /Boston/.test(t) && /Search live/i.test(t),
+             why: 'empty state did not name the list size, the query, or the live search' };
+  });
+
+  await interact('ambiguous place asks instead of guessing', [['geocoding-api', GEO2], ['alt-fuel-stations', STATIONS]], async page => {
+    await page.evaluate(() => UI.toggleFinder());
+    await page.waitForTimeout(150);
+    await page.fill('#finder-place', 'Rochester');
+    await page.click('button:has-text("Search this place")');
+    await page.waitForTimeout(400);
+    const t = await finderText(page);
+    return { ok: /More than one place matches/i.test(t) && /Michigan/.test(t) && /New York/.test(t),
+             why: 'did not offer a choice between same-named places' };
+  });
+
+  await interact('destination search returns stations, labelled with the place', [['geocoding-api', GEO2], ['alt-fuel-stations', STATIONS]], async page => {
+    await page.evaluate(() => UI.toggleFinder());
+    await page.waitForTimeout(150);
+    await page.fill('#finder-place', 'Rochester');
+    await page.click('button:has-text("Search this place")');
+    await page.waitForTimeout(350);
+    await page.click('button:has-text("Michigan")');
+    await page.waitForTimeout(400);
+    const t = await finderText(page);
+    return { ok: /Meijer - Rochester Hills/.test(t) && /Near\s+Rochester, Michigan/i.test(t),
+             why: 'stations missing or not labelled with the searched place' };
+  });
+
+  await interact('geocoder with no match says so, invents nothing', [['geocoding-api', { results: [] }]], async page => {
+    await page.evaluate(() => UI.toggleFinder());
+    await page.waitForTimeout(150);
+    await page.fill('#finder-place', 'Zzzzqqq');
+    await page.click('button:has-text("Search this place")');
+    await page.waitForTimeout(400);
+    const t = await finderText(page);
+    return { ok: /Nothing found/i.test(t), why: 'no-match case did not report an empty result' };
+  });
+
+  await interact('both live lookups offline: built-in list survives', null, async page => {
+    await page.evaluate(() => UI.toggleFinder());
+    await page.waitForTimeout(150);
+    await page.fill('#finder-place', 'Rochester');
+    await page.click('button:has-text("Search this place")');
+    await page.waitForTimeout(600);
+    const t = await finderText(page);
+    return { ok: /built-in list above still works/i.test(t) && /Built-in list/i.test(t),
+             why: 'offline path did not degrade to the built-in list' };
+  });
+
   await browser.close();
   if (failures) {
-    console.log(`\nsmoke: ${failures} of ${SCENARIOS.length} scenarios FAILED`);
+    console.log(`\nsmoke: ${failures} scenario(s) FAILED`);
     process.exit(1);
   }
-  console.log(`\nsmoke: all ${SCENARIOS.length} scenarios passed — app starts and paints`);
+  console.log(`\nsmoke: all ${SCENARIOS.length} startup + 7 interaction scenarios passed`);
 })();
